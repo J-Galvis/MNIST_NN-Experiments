@@ -87,3 +87,60 @@ def graficar_arnovi(historiales_loss, historiales_acc,
     except ImportError:
         print("\n  (matplotlib no disponible, se omite la gráfica)")
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GRÁFICA PARA EL ALGORITMO DE DIEGO
+# ─────────────────────────────────────────────────────────────────────────────
+
+def graficar_diego(historial_loss, historial_acc, historial_acc_test,
+                   historiales_loss_particiones, historiales_acc_particiones,
+                   num_particiones):
+    """
+    Genera 3 gráficas para el Algoritmo de Diego:
+      1. Pérdida: curvas individuales por partición + curva global promediada
+      2. Precisión en Train: curvas individuales + curva global
+      3. Precisión en Test del modelo promediado por época
+
+    Esto permite ver:
+      - Cómo cada partición se comporta independientemente (curvas tenues)
+      - El resultado DESPUÉS del promediado en cada época (curva gruesa)
+      - La evolución del modelo final en datos nunca vistos (test)
+    """
+    try:
+        import matplotlib.pyplot as plt
+
+        epocas = range(1, len(historial_loss) + 1)
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 5))
+
+        # ── Gráfica 1: Pérdida ────────────────────────────────────────────────
+        for k in range(num_particiones):
+            ax1.plot(epocas, historiales_loss_particiones[k], alpha=0.3,
+                     linewidth=1, label=f'Partición {k+1}')
+        ax1.plot(epocas, historial_loss, 'k-', linewidth=2.5,
+                 label='Global (promediado)', zorder=10)
+        ax1.set_title('Pérdida (Loss) — Algoritmo de Diego')
+        ax1.set_xlabel('Época')
+        ax1.set_ylabel('Cross-Entropy Loss')
+        ax1.legend(fontsize=7)
+        ax1.grid(True, alpha=0.3)
+
+        # ── Gráfica 2: Precisión en Train ─────────────────────────────────────
+        for k in range(num_particiones):
+            ax2.plot(epocas, historiales_acc_particiones[k], alpha=0.3,
+                     linewidth=1, label=f'Partición {k+1}')
+        ax2.plot(epocas, historial_acc, 'k-', linewidth=2.5,
+                 label='Global (promediado)', zorder=10)
+        ax2.set_title('Precisión Train — Algoritmo de Diego')
+        ax2.set_xlabel('Época')
+        ax2.set_ylabel('Precisión (%)')
+        ax2.set_ylim([0, 100])
+        ax2.legend(fontsize=7)
+        ax2.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig('entrenamiento_diego.png', dpi=120)
+        plt.show()
+        print("\n  Gráfica guardada en 'entrenamiento_diego.png'")
+
+    except ImportError:
+        print("\n  (matplotlib no disponible, se omite la gráfica)")

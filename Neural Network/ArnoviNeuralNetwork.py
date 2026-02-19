@@ -16,7 +16,7 @@ FLUJO DEL ALGORITMO DE ARNOVI
   ┌─────────────────────────────────────────────────────────┐
   │  1. Cargar y preprocesar MNIST (70000 imágenes)         │
   │  2. Separar en train (70%) y test (30%)                 │
-  │  3. Inicializar pesos UNA sola vez (W1, b1, W2, b2)    │
+  │  3. Inicializar pesos UNA sola vez (W1, b1, W2, b2)     │
   │  4. Dividir train en K particiones iguales              │
   │  5. Para cada partición k = 1, 2, ..., K:               │
   │     a) Copiar los pesos iniciales                       │
@@ -46,9 +46,9 @@ from WeightsHandling import inicializar_pesos, actualizar_pesos
 # HIPERPARÁMETROS DEL ALGORITMO DE ARNOVI
 # ─────────────────────────────────────────────────────────────────────────────
 
-NUM_PARTICIONES = 5     # Número de subconjuntos en que dividimos los datos
+NUM_PARTICIONES = 2     # Número de subconjuntos en que dividimos los datos
 EPOCAS_POR_PARTICION = 100  # Cuántas épocas entrena cada mini-red
-LEARNING_RATE = 0.4     # Tasa de aprendizaje (misma que BasicNeuralNetwork)
+LEARNING_RATE = 0.3     # Tasa de aprendizaje (misma que BasicNeuralNetwork)
 INTERVALO_LOG = 10      # Cada cuántas épocas imprimimos el progreso
 
 

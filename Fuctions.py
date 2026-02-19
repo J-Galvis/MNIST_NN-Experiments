@@ -83,6 +83,19 @@ def precision(y_pred, y_real):
     np.mean(y_pred == y_real) compara elemento a elemento y promedia los True/False.
     """
     return np.mean(y_pred == y_real) * 100
+  
+# ─────────────────────────────────────────────────────────────────────────────
+# FUNCIÓN DE PREDICCIÓN
+# ─────────────────────────────────────────────────────────────────────────────
+
+def predecir(X, W1, b1, W2, b2):
+    """
+    Realiza el forward pass y toma la clase con mayor probabilidad.
+    np.argmax devuelve el índice del valor máximo en cada fila.
+    Si A2[i] = [0.01, 0.02, 0.05, 0.85, ...], argmax = 3 → predicción: dígito 3
+    """
+    _, _, _, A2 = forward(X, W1, b1, W2, b2)
+    return np.argmax(A2, axis=1)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FORWARD PASS
@@ -116,20 +129,6 @@ def forward(X, W1, b1, W2, b2):
     A2 = softmax(Z2)        # (N, 10)  — convertimos a probabilidades
 
     return Z1, A1, Z2, A2
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FUNCIÓN DE PREDICCIÓN
-# ─────────────────────────────────────────────────────────────────────────────
-
-def predecir(X, W1, b1, W2, b2):
-    """
-    Realiza el forward pass y toma la clase con mayor probabilidad.
-    np.argmax devuelve el índice del valor máximo en cada fila.
-    Si A2[i] = [0.01, 0.02, 0.05, 0.85, ...], argmax = 3 → predicción: dígito 3
-    """
-    _, _, _, A2 = forward(X, W1, b1, W2, b2)
-    return np.argmax(A2, axis=1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

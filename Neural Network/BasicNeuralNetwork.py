@@ -87,7 +87,7 @@ from WeightsHandling import *
 # ─────────────────────────────────────────────────────────────────────────────
 
 def entrenar(X_train, Y_train, y_train, X_test, y_test,
-             epocas=100, lr=0.4, intervalo_log=10):
+             epocas=100, lr=0.3, intervalo_log=10):
     """
     Una ÉPOCA = un ciclo completo sobre TODO el dataset de entrenamiento.
     Como usamos Gradient Descent full-batch (no estocástico), en cada época:
