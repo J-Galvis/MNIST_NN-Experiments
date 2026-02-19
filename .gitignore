@@ -1,0 +1,6 @@
+/venv
+/data
+Explicacion_Detallada.md
+entrenamiento.png
+*.pyc
+__pycache__/
