@@ -40,6 +40,7 @@ from DatasetHandling import cargar_mnist, preprocesar
 from Graphics import graficar_arnovi
 from Fuctions import forward, backward, cross_entropy, precision, predecir
 from WeightsHandling import inicializar_pesos, actualizar_pesos
+from ModelPersistence import guardar_modelo, cargar_modelo, probar_modelo, probar_imagen
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -478,5 +479,14 @@ if __name__ == "__main__":
                     historial_loss_prom, historial_acc_prom,
                     NUM_PARTICIONES)
 
-    print("\n  ¡Entrenamiento con Algoritmo de Arnovi completado!")
-    print("  Los parámetros finales promediados son: W1_final, b1_final, W2_final, b2_final")
+    # 5. Guardar el modelo entrenado
+    y_pred_final = predecir(X_test, W1_final, b1_final, W2_final, b2_final)
+    acc_final = precision(y_pred_final, y_test)
+    guardar_modelo(
+        W1_final, b1_final, W2_final, b2_final,
+        nombre_modelo='ArnoviNN',
+        precision_test=acc_final,
+        epocas=EPOCAS_POR_PARTICION,
+        learning_rate=LEARNING_RATE,
+        info_extra={'num_particiones': NUM_PARTICIONES}
+    )

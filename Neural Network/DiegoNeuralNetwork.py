@@ -55,6 +55,7 @@ from DatasetHandling import cargar_mnist, preprocesar
 from Graphics import graficar_resultados, graficar_diego
 from Fuctions import forward, backward, cross_entropy, precision, predecir
 from WeightsHandling import inicializar_pesos, actualizar_pesos
+from ModelPersistence import guardar_modelo, cargar_modelo, probar_modelo, probar_imagen
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -454,5 +455,15 @@ if __name__ == "__main__":
     graficar_diego(historial_loss, historial_acc, historial_acc_test,
                    hist_loss_parts, hist_acc_parts, NUM_PARTICIONES)
 
-    print("\n  ¡Entrenamiento con Algoritmo de Diego completado!")
-    print("  Los parámetros finales son: W1, b1, W2, b2")
+    # 5. Guardar el modelo entrenado
+    y_pred_final = predecir(X_test, W1, b1, W2, b2)
+    acc_final = precision(y_pred_final, y_test)
+    guardar_modelo(
+        W1, b1, W2, b2,
+        nombre_modelo='DiegoNN',
+        precision_test=acc_final,
+        epocas=EPOCAS,
+        learning_rate=LEARNING_RATE,
+        info_extra={'num_particiones': NUM_PARTICIONES}
+    )
+

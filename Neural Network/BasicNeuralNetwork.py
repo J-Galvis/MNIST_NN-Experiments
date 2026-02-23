@@ -80,6 +80,7 @@ from DatasetHandling import *
 from Graphics import *
 from Fuctions import *
 from WeightsHandling import *
+from ModelPersistence import guardar_modelo, cargar_modelo, probar_modelo, probar_imagen
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -188,5 +189,13 @@ if __name__ == "__main__":
     # 4. Graficamos el progreso del entrenamiento
     graficar_resultados(historial_loss, historial_acc)
 
-    print("\n  ¡Entrenamiento completado!")
-    print("  Los parámetros finales son: W1, b1, W2, b2")
+    # 5. Guardar el modelo entrenado
+    y_pred_final = predecir(X_test, W1, b1, W2, b2)
+    acc_final = precision(y_pred_final, y_test)
+    guardar_modelo(
+        W1, b1, W2, b2,
+        nombre_modelo='BasicNN',
+        precision_test=acc_final,
+        epocas=100,
+        learning_rate=0.4
+    )
