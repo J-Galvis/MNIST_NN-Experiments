@@ -3,15 +3,8 @@
   RED NEURONAL DESDE CERO CON NUMPY — DATASET MNIST
 =============================================================================
 
-GUÍA CONCEPTUAL ANTES DE LEER EL CÓDIGO
-─────────────────────────────────────────
-  Una red neuronal es básicamente una cadena de multiplicaciones de matrices
-  seguidas de funciones no lineales (activaciones). El objetivo del
-  entrenamiento es encontrar los valores de esas matrices (pesos W) y
-  vectores (sesgos b) que hacen que la red clasifique correctamente.
-
-ARQUITECTURA QUE USAREMOS
-─────────────────────────
+ARQUITECTURA
+─────────────
   Capa de Entrada  : 784 neuronas  (28×28 píxeles aplanados a un vector)
         ↓
   Capa Oculta      : 128 neuronas  (ReLU como función de activación)
@@ -80,7 +73,7 @@ from DatasetHandling import *
 from Graphics import *
 from Fuctions import *
 from WeightsHandling import *
-from ModelPersistence import guardar_modelo, cargar_modelo, probar_modelo, probar_imagen
+from ModelPersistence import guardar_modelo, cargar_modelo, probar_modelo
 
 
 # ─────────────────────────────────────────────────────────────────────────────

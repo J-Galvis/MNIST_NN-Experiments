@@ -40,16 +40,16 @@ from DatasetHandling import cargar_mnist, preprocesar
 from Graphics import graficar_arnovi
 from Fuctions import forward, backward, cross_entropy, precision, predecir
 from WeightsHandling import inicializar_pesos, actualizar_pesos
-from ModelPersistence import guardar_modelo, cargar_modelo, probar_modelo, probar_imagen
+from ModelPersistence import guardar_modelo, cargar_modelo, probar_modelo
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HIPERPARÁMETROS DEL ALGORITMO DE ARNOVI
 # ─────────────────────────────────────────────────────────────────────────────
 
-NUM_PARTICIONES = 2     # Número de subconjuntos en que dividimos los datos
+NUM_PARTICIONES = 5     # Número de subconjuntos en que dividimos los datos
 EPOCAS_POR_PARTICION = 100  # Cuántas épocas entrena cada mini-red
-LEARNING_RATE = 0.3     # Tasa de aprendizaje (misma que BasicNeuralNetwork)
+LEARNING_RATE = 0.1     # Tasa de aprendizaje (misma que BasicNeuralNetwork)
 INTERVALO_LOG = 10      # Cada cuántas épocas imprimimos el progreso
 
 
@@ -60,25 +60,6 @@ INTERVALO_LOG = 10      # Cada cuántas épocas imprimimos el progreso
 def particionar_dataset(X_train, Y_train, y_train, num_particiones):
     """
     Divide el dataset de entrenamiento en K particiones iguales.
-
-    ¿QUÉ OPERACIÓN MATEMÁTICA HACEMOS AQUÍ?
-    ─────────────────────────────────────────
-    Si tenemos N = 49000 muestras de entrenamiento y K = 5 particiones:
-
-      Tamaño de cada partición = N / K = 49000 / 5 = 9800 muestras
-
-    ANTES DE DIVIDIR, mezclamos aleatoriamente los índices. ¿Por qué?
-    Si los datos están ordenados por dígito (todos los 0s primero, luego 1s, etc.),
-    una partición podría recibir solo 0s y 1s, y otra solo 8s y 9s. Eso sería
-    desastroso porque cada red solo aprendería a reconocer algunos dígitos.
-
-    Al mezclar, garantizamos que cada partición tenga una muestra representativa
-    de TODOS los dígitos (0-9).
-
-    La operación np.array_split divide un array en K partes:
-      Si N no es divisible por K, las primeras particiones tendrán 1 elemento más.
-      Ejemplo: 49000 / 5 = 9800 exacto → 5 particiones de 9800 cada una.
-      Ejemplo: 49001 / 5 → particiones de [9801, 9800, 9800, 9800, 9800].
 
     Parámetros
     ──────────
@@ -136,31 +117,6 @@ def entrenar_particion(X_k, Y_k, y_k, W1_init, b1_init, W2_init, b2_init,
                        X_test=None, y_test=None):
     """
     Entrena una red neuronal usando SOLO los datos de una partición.
-
-    PUNTO CLAVE: COPIAR LOS PESOS INICIALES
-    ─────────────────────────────────────────
-    Usamos np.copy() para crear copias INDEPENDIENTES de los pesos iniciales.
-    Sin np.copy(), todas las particiones modificarían la MISMA matriz en memoria
-    (porque en Python, las asignaciones de arrays son por referencia, no por copia).
-
-    Ejemplo de por qué es importante:
-      W1 = W1_init          ← NO copia, W1 apunta a la misma memoria que W1_init
-      W1[0,0] = 999         ← ¡Esto también cambia W1_init!
-
-      W1 = np.copy(W1_init) ← SÍ copia, W1 es independiente
-      W1[0,0] = 999         ← W1_init no se ve afectado
-
-    Esto es fundamental en el algoritmo de Arnovi: cada red DEBE entrenar
-    de forma independiente, sin afectar a las demás.
-
-    El entrenamiento es IDÉNTICO al de BasicNeuralNetwork.py:
-      1. Forward pass: calcular predicciones
-      2. Calcular pérdida (cross-entropy)
-      3. Backward pass: calcular gradientes
-      4. Actualizar pesos (gradient descent)
-
-    La única diferencia es que aquí X_k tiene MENOS muestras que X_train
-    completo (N/K en lugar de N).
 
     Parámetros
     ──────────
@@ -247,38 +203,6 @@ def entrenar_particion(X_k, Y_k, y_k, W1_init, b1_init, W2_init, b2_init,
 def promediar_pesos(lista_pesos):
     """
     Promedia los pesos de K redes entrenadas independientemente.
-
-    MATEMÁTICA DEL PROMEDIADO
-    ──────────────────────────
-    Si tenemos K redes, cada una con sus propios pesos (W1_k, b1_k, W2_k, b2_k),
-    el promedio se calcula así:
-
-      W1_final[i,j] = (1/K) · Σ_{k=1}^{K} W1_k[i,j]
-
-    Esto es un promedio aritmético, aplicado INDEPENDIENTEMENTE a cada
-    posición (i,j) de la matriz.
-
-    EJEMPLO CON MATRICES PEQUEÑAS (2×2, K=3)
-    ──────────────────────────────────────────
-    Red 1:  W = [[1, 2],     Red 2:  W = [[4, 5],     Red 3:  W = [[7, 8],
-                 [3, 4]]                  [6, 7]]                  [9, 10]]
-
-    Promedio: W_final = (1/3) · ([[1,2],[3,4]] + [[4,5],[6,7]] + [[7,8],[9,10]])
-
-                      = (1/3) · [[1+4+7, 2+5+8],  =  (1/3) · [[12, 15],
-                                 [3+6+9, 4+7+10]]              [18, 21]]
-
-                      = [[4, 5],
-                         [6, 7]]
-
-    En NumPy esto se hace muy elegantemente:
-      1. Apilamos todas las matrices W1 en un array 3D: (K, 784, 128)
-         np.array([W1_red1, W1_red2, ..., W1_redK]) → forma (K, 784, 128)
-      2. Calculamos el promedio a lo largo del eje 0 (el eje de las K redes)
-         np.mean(..., axis=0) → forma (784, 128)
-
-    El eje 0 es el que indexa "cuál red", así que promediar sobre ese eje
-    nos deja con una sola matriz que combina la información de todas.
 
     Parámetros
     ──────────

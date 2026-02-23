@@ -55,7 +55,7 @@ from DatasetHandling import cargar_mnist, preprocesar
 from Graphics import graficar_resultados, graficar_diego
 from Fuctions import forward, backward, cross_entropy, precision, predecir
 from WeightsHandling import inicializar_pesos, actualizar_pesos
-from ModelPersistence import guardar_modelo, cargar_modelo, probar_modelo, probar_imagen
+from ModelPersistence import guardar_modelo, cargar_modelo, probar_modelo
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ from ModelPersistence import guardar_modelo, cargar_modelo, probar_modelo, proba
 
 NUM_PARTICIONES = 5     # Número de subconjuntos en que dividimos los datos
 EPOCAS = 100            # Número total de épocas (rondas de sincronización)
-LEARNING_RATE = 0.3     # Tasa de aprendizaje
+LEARNING_RATE = 0.1     # Tasa de aprendizaje
 INTERVALO_LOG = 10      # Cada cuántas épocas imprimimos progreso
 
 
@@ -75,13 +75,6 @@ INTERVALO_LOG = 10      # Cada cuántas épocas imprimimos progreso
 def particionar_dataset(X_train, Y_train, y_train, num_particiones):
     """
     Divide el dataset de entrenamiento en K particiones iguales.
-
-    Mezclamos aleatoriamente antes de dividir para garantizar que cada
-    partición contenga muestras de todos los dígitos (0-9).
-
-    A diferencia de Arnovi donde las particiones se crean una sola vez,
-    en Diego las particiones se mantienen FIJAS durante todo el entrenamiento.
-    Lo que cambia es que los pesos se sincronizan después de cada época.
 
     Parámetros
     ──────────
@@ -131,42 +124,6 @@ def train_on_batch(X_k, Y_k, W1, b1, W2, b2, lr):
     Entrena la red con UN SOLO batch de datos (una partición) y retorna
     los pesos actualizados.
 
-    ¿QUÉ HACE ESTA FUNCIÓN?
-    ────────────────────────
-    Es como una "mini-época": recibe un subconjunto de datos, hace UNA
-    pasada completa (forward + backward + actualización) y devuelve los
-    pesos modificados.
-
-    PROCESO PASO A PASO
-    ────────────────────
-    1. FORWARD PASS — Calcular predicciones con los pesos actuales
-       Z1 = X_k · W1 + b1          (N_k, 784) @ (784, 128) = (N_k, 128)
-       A1 = ReLU(Z1)               (N_k, 128)
-       Z2 = A1 · W2 + b2           (N_k, 128) @ (128, 10) = (N_k, 10)
-       A2 = Softmax(Z2)            (N_k, 10) — probabilidades
-
-    2. BACKWARD PASS — Calcular gradientes
-       dZ2 = A2 - Y_k              (N_k, 10)
-       dW2 = (1/N_k) · A1ᵀ · dZ2  (128, 10)
-       db2 = (1/N_k) · Σ dZ2       (1, 10)
-       dA1 = dZ2 · W2ᵀ             (N_k, 128)
-       dZ1 = dA1 * ReLU'(Z1)       (N_k, 128)
-       dW1 = (1/N_k) · X_kᵀ · dZ1 (784, 128)
-       db1 = (1/N_k) · Σ dZ1       (1, 128)
-
-       NOTA: Los gradientes se dividen por N_k (tamaño de la partición),
-       no por N (tamaño total del dataset). Esto significa que el gradiente
-       representa la dirección de mejora PROMEDIO para esa partición.
-
-    3. ACTUALIZAR PESOS — Gradient descent
-       W1 = W1 - lr · dW1
-       b1 = b1 - lr · db1
-       W2 = W2 - lr · dW2
-       b2 = b2 - lr · db2
-
-    La diferencia con entrenar_particion() de Arnovi es que aquí hacemos
-    UNA SOLA actualización, no un loop de muchas épocas.
-
     Parámetros
     ──────────
     X_k  : np.array, forma (N_k, 784) — datos de la partición k
@@ -208,21 +165,6 @@ def promediar_pesos(lista_pesos):
     """
     Promedia los pesos de K redes tras entrenar cada una con su partición.
 
-    MATEMÁTICA
-    ──────────
-    Si las K particiones producen pesos W1_1, W1_2, ..., W1_K (cada uno de
-    forma (784, 128)), el promedio es:
-
-      W1_prom[i,j] = (1/K) · (W1_1[i,j] + W1_2[i,j] + ... + W1_K[i,j])
-
-    En NumPy:
-      np.array([W1_1, W1_2, ..., W1_K])  →  forma (K, 784, 128)
-      np.mean(..., axis=0)                →  forma (784, 128)
-
-    El eje 0 es el que indexa "cuál partición". Promediar sobre ese eje
-    colapsa las K matrices en una sola que contiene el consenso.
-
-    INTUICIÓN GEOMÉTRICA
     ─────────────────────
     Cada partición propone "moverse" en una dirección diferente del espacio
     de parámetros. El promediado encuentra el punto central de todas esas
@@ -255,28 +197,6 @@ def entrenar_diego(X_train, Y_train, y_train, X_test, y_test,
                    intervalo_log=INTERVALO_LOG):
     """
     Ejecuta el Algoritmo de Diego completo.
-
-    PSEUDOCÓDIGO
-    ─────────────
-    1.  Inicializar W1, b1, W2, b2 (una sola vez)
-    2.  Particionar el dataset en K partes fijas
-    3.  Para cada época e = 1, ..., E:
-          a) estado_global ← copiar(W1, b1, W2, b2)
-          b) Para cada partición k = 1, ..., K:
-               pesos_k ← train_on_batch(datos_k, estado_global, lr)
-          c) W1, b1, W2, b2 ← promediar(pesos_1, ..., pesos_K)
-          d) Evaluar sobre TODOS los datos de entrenamiento → registrar loss, acc
-    4.  Evaluar en test → resultado final
-
-    COMPARACIÓN CON ARNOVI Y BASIC
-    ────────────────────────────────
-    Basic:   1 red, todos los datos, 100 épocas
-    Arnovi:  K redes, datos divididos, 100 épocas cada una, promediado AL FINAL
-    Diego:   K redes, datos divididos, 1 paso por época, promediado CADA ÉPOCA
-
-    Diego es el más "comunicativo": las redes comparten información
-    constantemente. Arnovi es el más "independiente": cada red trabaja
-    sola y solo comparten al terminar.
     """
 
     print("\n" + "=" * 60)
