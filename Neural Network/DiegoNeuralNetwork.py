@@ -48,14 +48,14 @@ import sys
 import os
 import numpy as np
 
-# ── Agregar el directorio padre al path para encontrar los módulos ─────────
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+# ── Agregar el directorio de módulos al path para encontrar los módulos ─────────
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Modules'))
 
 from DatasetHandling import cargar_mnist, preprocesar
 from Graphics import graficar_resultados, graficar_diego
 from Fuctions import forward, backward, cross_entropy, precision, predecir
 from WeightsHandling import inicializar_pesos, actualizar_pesos
-from ModelPersistence import guardar_modelo, cargar_modelo, probar_modelo
+from ModelPersistence import guardar_modelo, cargar_modelo
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -191,10 +191,7 @@ def promediar_pesos(lista_pesos):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def entrenar_diego(X_train, Y_train, y_train, X_test, y_test,
-                   num_particiones=NUM_PARTICIONES,
-                   epocas=EPOCAS,
-                   lr=LEARNING_RATE,
-                   intervalo_log=INTERVALO_LOG):
+                   num_particiones,epocas,lr,intervalo_log):
     """
     Ejecuta el Algoritmo de Diego completo.
     """
@@ -231,8 +228,8 @@ def entrenar_diego(X_train, Y_train, y_train, X_test, y_test,
 
     # Historiales por partición: para cada partición k, guardamos su loss y acc
     # en cada época ANTES del promediado (lo que cada red individual aprendió)
-    historiales_loss_particiones = [[] for _ in range(num_particiones)]
-    historiales_acc_particiones  = [[] for _ in range(num_particiones)]
+    hist_loss_parts = [[] for _ in range(num_particiones)]
+    hist_acc_parts  = [[] for _ in range(num_particiones)]
 
     for epoca in range(1, epocas + 1):
 
@@ -273,8 +270,8 @@ def entrenar_diego(X_train, Y_train, y_train, X_test, y_test,
             _, _, _, A2_k = forward(X_k, W1_k, b1_k, W2_k, b2_k)
             loss_k = cross_entropy(A2_k, Y_k)
             acc_k  = precision(np.argmax(A2_k, axis=1), y_k)
-            historiales_loss_particiones[k].append(loss_k)
-            historiales_acc_particiones[k].append(acc_k)
+            hist_loss_parts[k].append(loss_k)
+            hist_acc_parts[k].append(acc_k)
 
         # ── c) Promediar los pesos de todas las particiones ──────────────────
         # Este promediado es la "sincronización" que hace especial a Diego.
@@ -320,8 +317,8 @@ def entrenar_diego(X_train, Y_train, y_train, X_test, y_test,
 
             # Mostrar qué hizo cada partición individualmente
             for k in range(num_particiones):
-                l_k = historiales_loss_particiones[k][-1]
-                a_k = historiales_acc_particiones[k][-1]
+                l_k = hist_loss_parts[k][-1]
+                a_k = hist_acc_parts[k][-1]
                 print(f"    Partición {k+1}: Loss={l_k:.4f}  Acc={a_k:.1f}%")
 
             # Mostrar el resultado del modelo promediado
@@ -338,9 +335,24 @@ def entrenar_diego(X_train, Y_train, y_train, X_test, y_test,
     acc_final = precision(y_pred_test, y_test)
     print(f"\n  Precisión FINAL del modelo Diego en TEST: {acc_final:.2f}%")
 
-    return (W1, b1, W2, b2, historial_loss, historial_acc,
-            historial_acc_test, historiales_loss_particiones,
-            historiales_acc_particiones)
+
+    # ── Graficar resultados ────────────────────────────────────────────────
+    graficar_diego(historial_loss, historial_acc, historial_acc_test,
+                   hist_loss_parts, hist_acc_parts, NUM_PARTICIONES)
+
+    # Guardar el modelo entrenado
+    y_pred_final = predecir(X_test, W1, b1, W2, b2)
+    acc_final = precision(y_pred_final, y_test)
+    guardar_modelo(
+        W1, b1, W2, b2,
+        nombre_modelo='DiegoNN',
+        precision_test=acc_final,
+        epocas=EPOCAS,
+        learning_rate=LEARNING_RATE,
+        info_extra={'num_particiones': NUM_PARTICIONES}
+    )
+
+    return 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -361,8 +373,7 @@ if __name__ == "__main__":
     X_train, Y_train, y_train, X_test, Y_test, y_test = preprocesar(X_all, y_all)
 
     # ── 3. Ejecutar el Algoritmo de Diego ─────────────────────────────────────
-    (W1, b1, W2, b2, historial_loss, historial_acc,
-     historial_acc_test, hist_loss_parts, hist_acc_parts) = entrenar_diego(
+    entrenar_diego(
         X_train, Y_train, y_train,
         X_test, y_test,
         num_particiones=NUM_PARTICIONES,
@@ -371,19 +382,4 @@ if __name__ == "__main__":
         intervalo_log=INTERVALO_LOG
     )
 
-    # ── 4. Graficar resultados ────────────────────────────────────────────────
-    graficar_diego(historial_loss, historial_acc, historial_acc_test,
-                   hist_loss_parts, hist_acc_parts, NUM_PARTICIONES)
-
-    # 5. Guardar el modelo entrenado
-    y_pred_final = predecir(X_test, W1, b1, W2, b2)
-    acc_final = precision(y_pred_final, y_test)
-    guardar_modelo(
-        W1, b1, W2, b2,
-        nombre_modelo='DiegoNN',
-        precision_test=acc_final,
-        epocas=EPOCAS,
-        learning_rate=LEARNING_RATE,
-        info_extra={'num_particiones': NUM_PARTICIONES}
-    )
 

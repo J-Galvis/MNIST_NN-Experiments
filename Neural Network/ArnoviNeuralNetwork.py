@@ -33,14 +33,14 @@ import sys
 import os
 import numpy as np
 
-# ── Agregar el directorio padre al path para encontrar los módulos ─────────
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+# ── Agregar el directorio de módulos al path para encontrar los módulos ─────────
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Modules'))
 
 from DatasetHandling import cargar_mnist, preprocesar
 from Graphics import graficar_arnovi
 from Fuctions import forward, backward, cross_entropy, precision, predecir
 from WeightsHandling import inicializar_pesos, actualizar_pesos
-from ModelPersistence import guardar_modelo, cargar_modelo, probar_modelo
+from ModelPersistence import guardar_modelo, cargar_modelo
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -155,6 +155,7 @@ def entrenar_particion(X_k, Y_k, y_k, W1_init, b1_init, W2_init, b2_init,
     for epoca in range(1, epocas + 1):
 
         # ── Forward Pass ─────────────────────────────────────────────────────
+        
         # Exactamente igual que en BasicNeuralNetwork, pero con X_k (menos datos)
         #   Z1 = X_k · W1 + b1     →  (N_k, 784) @ (784, 128) = (N_k, 128)
         #   A1 = ReLU(Z1)          →  (N_k, 128)
@@ -243,10 +244,7 @@ def promediar_pesos(lista_pesos):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def entrenar_arnovi(X_train, Y_train, y_train, X_test, y_test,
-                    num_particiones=NUM_PARTICIONES,
-                    epocas=EPOCAS_POR_PARTICION,
-                    lr=LEARNING_RATE,
-                    intervalo_log=INTERVALO_LOG):
+                    num_particiones,epocas,lr,intervalo_log):
     """
     Ejecuta el Algoritmo de Arnovi completo:
       1. Inicializar pesos (una sola vez)
@@ -361,9 +359,25 @@ def entrenar_arnovi(X_train, Y_train, y_train, X_test, y_test,
     historial_loss_promedio = np.mean(np.array(historiales_loss), axis=0).tolist()
     historial_acc_promedio  = np.mean(np.array(historiales_acc), axis=0).tolist()
 
-    return (W1_final, b1_final, W2_final, b2_final,
-            historial_loss_promedio, historial_acc_promedio,
-            lista_pesos_entrenados, historiales_loss, historiales_acc)
+
+    # ── Graficar resultados ────────────────────────────────────────────────
+    graficar_arnovi(historiales_loss, historiales_acc,
+                    historial_loss_promedio, historial_acc_promedio,
+                    NUM_PARTICIONES)
+
+    # Guardar el modelo entrenado
+    y_pred_final = predecir(X_test, W1_final, b1_final, W2_final, b2_final)
+    acc_final = precision(y_pred_final, y_test)
+    guardar_modelo(
+        W1_final, b1_final, W2_final, b2_final,
+        nombre_modelo='ArnoviNN',
+        precision_test=acc_final,
+        epocas=EPOCAS_POR_PARTICION,
+        learning_rate=LEARNING_RATE,
+        info_extra={'num_particiones': NUM_PARTICIONES}
+    )
+
+    return 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -387,9 +401,8 @@ if __name__ == "__main__":
     #    NUM_PARTICIONES=5:  dividimos train en 5 subconjuntos
     #    epocas=100:         cada mini-red entrena 100 épocas
     #    lr=0.4:             learning rate igual que BasicNeuralNetwork
-    (W1_final, b1_final, W2_final, b2_final,
-     historial_loss_prom, historial_acc_prom,
-     lista_pesos, historiales_loss, historiales_acc) = entrenar_arnovi(
+    
+    entrenar_arnovi(
         X_train, Y_train, y_train,
         X_test, y_test,
         num_particiones=NUM_PARTICIONES,
@@ -398,19 +411,3 @@ if __name__ == "__main__":
         intervalo_log=INTERVALO_LOG
     )
 
-    # ── 4. Graficar resultados ────────────────────────────────────────────────
-    graficar_arnovi(historiales_loss, historiales_acc,
-                    historial_loss_prom, historial_acc_prom,
-                    NUM_PARTICIONES)
-
-    # 5. Guardar el modelo entrenado
-    y_pred_final = predecir(X_test, W1_final, b1_final, W2_final, b2_final)
-    acc_final = precision(y_pred_final, y_test)
-    guardar_modelo(
-        W1_final, b1_final, W2_final, b2_final,
-        nombre_modelo='ArnoviNN',
-        precision_test=acc_final,
-        epocas=EPOCAS_POR_PARTICION,
-        learning_rate=LEARNING_RATE,
-        info_extra={'num_particiones': NUM_PARTICIONES}
-    )
