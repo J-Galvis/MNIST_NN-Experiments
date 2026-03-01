@@ -1,37 +1,43 @@
 """
 =============================================================================
-  ALGORITMO DE DIEGO — ENTRENAMIENTO FEDERADO CON PROMEDIADO POR ÉPOCA
+  ALGORITMO MULTIPROCESSING — FEDERADO CON PROMEDIADO POR ÉPOCA
 =============================================================================
 
-  Diego:
-    Época 1: entrenar + promediar → nuevo punto de partida
-    Época 2: entrenar + promediar → nuevo punto de partida
+  Algoritmo Multiprocessing (versión mejorada de Diego):
+    Época 1: entrenar particiones EN PARALELO + promediar → nuevo punto de partida
+    Época 2: entrenar particiones EN PARALELO + promediar → nuevo punto de partida
     ...
-    Época 100: entrenar + promediar → modelo final
+    Época 100: entrenar particiones EN PARALELO + promediar → modelo final
 
-  En Diego, los pesos se "sincronizan" después de CADA época.
-  Esto es más cercano al verdadero Federated Averaging (FedAvg).
+  MEJORAS RESPECTO A DIEGO:
+  • Usa multiprocessing.Pool para entrenar particiones en paralelo
+  • Limita el número de procesos al número de núcleos disponibles (MAX_WORKERS)
+  • Mantiene la sincronización por época (promediado al final de cada época)
+  • Más eficiente en sistemas multi-núcleo
 
 FLUJO DEL ALGORITMO POR ÉPOCA
 ──────────────────────────────
   Para cada época e = 1, 2, ..., E:
 
-  ┌─────────────────────────────────────────────────────────────┐
-  │  a) Copiar el estado global actual (W1, b1, W2, b2)        │
-  │                                                             │
-  │  b) Para cada partición k = 1, ..., K:                      │
-  │     - Recibir COPIA de los pesos globales                   │
-  │     - Hacer UN forward pass con su batch de datos           │
-  │     - Calcular gradientes (backward pass)                   │
-  │     - Aplicar UNA actualización de pesos                    │
-  │     - Devolver los pesos actualizados                       │
-  │                                                             │
-  │  c) Promediar los K conjuntos de pesos actualizados         │
-  │     W_global = (1/K) · Σ W_k                                │
-  │                                                             │
-  │  d) Evaluar el modelo promediado sobre TODOS los datos      │
-  │     para registrar loss y accuracy globales                 │
-  └─────────────────────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────────────────────────┐
+  │  a) Guardar estado global actual (W1, b1, W2, b2)               │
+  │                                                                  │
+  │  b) Entrenar TODAS las particiones EN PARALELO:                  │
+  │     ├─ Proceso 1: train_on_batch(partición 1, pesos_globales)   │
+  │     ├─ Proceso 2: train_on_batch(partición 2, pesos_globales)   │
+  │     ├─ Proceso 3: train_on_batch(partición 3, pesos_globales)   │
+  │     └─ Proceso K: train_on_batch(partición K, pesos_globales)   │
+  │     → Los procesos se ejecutan simultáneamente                   │
+  │     → Máximo de procesos = MAX_WORKERS (núcleos disponibles)     │
+  │                                                                  │
+  │  c) Recopilar todos los pesos entrenados de las K particiones   │
+  │                                                                  │
+  │  d) Promediar los K conjuntos de pesos actualizados              │
+  │     W_global = (1/K) · Σ W_k                                     │
+  │                                                                  │
+  │  e) Evaluar el modelo promediado sobre TODOS los datos           │
+  │     para registrar loss y accuracy globales                      │
+  └──────────────────────────────────────────────────────────────────┘
 
 ARQUITECTURA (IDÉNTICA A BasicNeuralNetwork.py)
 ────────────────────────────────────────────────
@@ -41,12 +47,21 @@ ARQUITECTURA (IDÉNTICA A BasicNeuralNetwork.py)
         ↓
   Capa de Salida   : 10 neuronas   (Softmax)
 
+DISTRIBUCIÓN DE PROCESOS
+────────────────────────
+  • MAX_WORKERS: Número máximo de procesos concurrentes
+  • Determinado por os.cpu_count() (número de núcleos del sistema)
+  • multiprocessing.Pool gestiona automáticamente la cola de tareas
+  • Cada partición espera su turno en la pool cuando están todos los núcleos ocupados
+
 =============================================================================
 """
 
 import sys
 import os
 import numpy as np
+from multiprocessing import Pool, cpu_count
+import time
 
 # ── Agregar el directorio padre al path para acceder al paquete Utils ─────────
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -59,18 +74,64 @@ from Utils.ModelPersistence import guardar_modelo, cargar_modelo
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HIPERPARÁMETROS DEL ALGORITMO DE DIEGO
+# HIPERPARÁMETROS DEL ALGORITMO MULTIPROCESSING
 # ─────────────────────────────────────────────────────────────────────────────
 
-NUM_PARTICIONES = 5     # Número de subconjuntos en que dividimos los datos
+NUM_PARTICIONES = 4     # Número de subconjuntos en que dividimos los datos
 EPOCAS = 100            # Número total de épocas (rondas de sincronización)
 LEARNING_RATE = 0.1     # Tasa de aprendizaje
 INTERVALO_LOG = 10      # Cada cuántas épocas imprimimos progreso
+MAX_WORKERS = NUM_PARTICIONES # Máximo de procesos concurrentes
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PASO 1: PARTICIONAR EL DATASET
+# FUNCIÓN WORKER PARA MULTIPROCESSING
 # ─────────────────────────────────────────────────────────────────────────────
+
+def worker_entrenar_particion(args):
+    """
+    Función worker para entrenar una partición en un proceso separado.
+    
+    Se ejecuta en un proceso hijo que entrena una partición con los pesos
+    globales recibidos y devuelve los pesos actualizados.
+    
+    Parámetros
+    ──────────
+    args : tupla
+        (id_particion, X_k, Y_k, y_k, W1_global, b1_global, W2_global, b2_global, lr)
+    
+    Retorna
+    ───────
+    tupla (id_particion, W1_actualizado, b1_actualizado, W2_actualizado, b2_actualizado,
+           loss_particion, acc_particion)
+    """
+    (idx_part, X_k, Y_k, y_k, W1_glob, b1_glob, W2_glob, b2_glob, lr) = args
+    
+    # Copiar pesos para no mutar los originales (en el proceso hijo)
+    W1_local = np.copy(W1_glob)
+    b1_local = np.copy(b1_glob)
+    W2_local = np.copy(W2_glob)
+    b2_local = np.copy(b2_glob)
+    
+    # Forward Pass
+    Z1, A1, Z2, A2 = forward(X_k, W1_local, b1_local, W2_local, b2_local)
+    
+    # Backward Pass
+    dW1, db1, dW2, db2 = backward(X_k, Y_k, Z1, A1, A2, W2_local)
+    
+    # Actualizar Pesos
+    W1_local, b1_local, W2_local, b2_local = actualizar_pesos(
+        W1_local, b1_local, W2_local, b2_local,
+        dW1, db1, dW2, db2, lr
+    )
+    
+    # Calcular métricas de la partición
+    loss_k = cross_entropy(A2, Y_k)
+    acc_k = precision(np.argmax(A2, axis=1), y_k)
+    
+    return (idx_part, W1_local, b1_local, W2_local, b2_local, loss_k, acc_k)
+
+
 
 def particionar_dataset(X_train, Y_train, y_train, num_particiones):
     """
@@ -187,172 +248,161 @@ def promediar_pesos(lista_pesos):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PASO 4: ALGORITMO COMPLETO DE DIEGO
+# PASO 4: ALGORITMO COMPLETO CON MULTIPROCESSING
 # ─────────────────────────────────────────────────────────────────────────────
 
-def entrenar_diego(X_train, Y_train, y_train, X_test, y_test,
-                   num_particiones,epocas,lr,intervalo_log):
+def entrenar_multiprocessing(X_train, Y_train, y_train, X_test, y_test,
+                             num_particiones, epocas, lr, intervalo_log, max_workers):
     """
-    Ejecuta el Algoritmo de Diego completo.
+    Ejecuta el Algoritmo Multiprocessing completo con entrenamiento paralelo.
+    
+    Los pesos se promedian al final de cada época y ese promedio se convierte
+    en el punto de partida de la siguiente época.
     """
 
-    print("\n" + "=" * 60)
-    print("  ALGORITMO DE DIEGO — ENTRENAMIENTO FEDERADO POR ÉPOCA")
-    print("=" * 60)
+    print("\n" + "=" * 70)
+    print("  ALGORITMO MULTIPROCESSING — ENTRENAMIENTO FEDERADO PARALELO")
+    print("=" * 70)
     print(f"  Particiones       : {num_particiones}")
     print(f"  Épocas totales    : {epocas}")
     print(f"  Learning Rate     : {lr}")
+    print(f"  Núcleos disponibles: {cpu_count()}")
+    print(f"  Máx. procesos     : {max_workers}")
     print(f"  Muestras totales  : {X_train.shape[0]}")
     print(f"  Muestras por red  : ~{X_train.shape[0] // num_particiones}")
 
-    # ── PASO 1: Inicializar pesos UNA sola vez ───────────────────────────────
-    print("\n" + "=" * 60)
+    # ── PASO 1: Inicializar pesos globales una sola vez ───────────────────
+    print("\n" + "=" * 70)
     print("  PASO 1: INICIALIZANDO PESOS GLOBALES")
-    print("=" * 60)
+    print("=" * 70)
     W1, b1, W2, b2 = inicializar_pesos()
 
-    # ── PASO 2: Particionar el dataset (particiones FIJAS) ────────────────────
-    print("\n" + "=" * 60)
+    # ── PASO 2: Particionar el dataset (particiones FIJAS) ─────────────────
+    print("\n" + "=" * 70)
     print("  PASO 2: PARTICIONANDO EL DATASET")
-    print("=" * 60)
+    print("=" * 70)
     particiones = particionar_dataset(X_train, Y_train, y_train, num_particiones)
 
-    # ── PASO 3: Bucle principal — una ronda de federación por época ──────────
-    print("\n" + "=" * 60)
-    print("  PASO 3: ENTRENAMIENTO FEDERADO (PROMEDIADO POR ÉPOCA)")
-    print("=" * 60)
+    # ── PASO 3: Bucle principal — entrenamiento federado paralelo ─────────
+    print("\n" + "=" * 70)
+    print("  PASO 3: ENTRENAMIENTO FEDERADO PARALELO (PROMEDIADO POR ÉPOCA)")
+    print("=" * 70)
 
     historial_loss = []
     historial_acc  = []
     historial_acc_test = []
 
-    # Historiales por partición: para cada partición k, guardamos su loss y acc
-    # en cada época ANTES del promediado (lo que cada red individual aprendió)
+    # Historiales por partición
     hist_loss_parts = [[] for _ in range(num_particiones)]
     hist_acc_parts  = [[] for _ in range(num_particiones)]
 
     for epoca in range(1, epocas + 1):
+        
+        tiempo_inicio_epoca = time.time()
 
-        # ── a) Estado global actual ──────────────────────────────────────────
-        # Guardamos una referencia a los pesos actuales. No necesitamos
-        # copiar aquí porque train_on_batch() ya copia internamente.
-        # Los pesos W1, b1, W2, b2 NO se modifican en este punto.
-        W1_global = W1
-        b1_global = b1
-        W2_global = W2
-        b2_global = b2
+        # ── a) Guardar estado global actual ───────────────────────────────
+        W1_global = np.copy(W1)
+        b1_global = np.copy(b1)
+        W2_global = np.copy(W2)
+        b2_global = np.copy(b2)
 
-        # ── b) Entrenar cada partición de forma independiente ────────────────
-        # Cada partición recibe los MISMOS pesos globales y hace UNA pasada
-        #
-        # Visualmente para K=3:
-        #
-        #   Pesos globales ──┬── Partición 1 ── train_on_batch() ── pesos_1
-        #                    ├── Partición 2 ── train_on_batch() ── pesos_2
-        #                    └── Partición 3 ── train_on_batch() ── pesos_3
-        #
-        #   pesos_1, pesos_2, pesos_3 ──── promediar() ──── nuevos pesos globales
+        # ── b) Preparar argumentos para los workers ──────────────────────
+        # Cada worker recibe: (id, X_k, Y_k, y_k, W1_global, b1_global, W2_global, b2_global, lr)
+        args_lista = []
+        for idx, (X_k, Y_k, y_k) in enumerate(particiones):
+            args = (idx, X_k, Y_k, y_k, W1_global, b1_global, W2_global, b2_global, lr)
+            args_lista.append(args)
 
+        # ── c) Entrenar TODAS las particiones EN PARALELO ──────────────────
+        # multiprocessing.Pool.map() distribuye las tareas entre los workers
+        # Máximo de procesos concurrentes = max_workers
+        try:
+            with Pool(processes=max_workers) as pool:
+                resultados = pool.map(worker_entrenar_particion, args_lista)
+        except Exception as e:
+            print(f"\n  ✗ Error durante multiprocessing en época {epoca}: {e}")
+            return 1
+
+        # ── d) Procesar resultados y actualizar pesos ────────────────────
         lista_pesos_epoca = []
-
-        for k, (X_k, Y_k, y_k) in enumerate(particiones):
-            # train_on_batch copia los pesos globales, hace forward + backward
-            # + actualización, y devuelve los pesos modificados
-            W1_k, b1_k, W2_k, b2_k = train_on_batch(
-                X_k, Y_k,
-                W1_global, b1_global, W2_global, b2_global,
-                lr
-            )
+        
+        for resultado in resultados:
+            idx, W1_k, b1_k, W2_k, b2_k, loss_k, acc_k = resultado
             lista_pesos_epoca.append((W1_k, b1_k, W2_k, b2_k))
+            hist_loss_parts[idx].append(loss_k)
+            hist_acc_parts[idx].append(acc_k)
 
-            # ── Métricas por partición (ANTES del promediado) ────────────────
-            # Evaluamos qué tan bien le fue a ESTA partición con SUS datos
-            _, _, _, A2_k = forward(X_k, W1_k, b1_k, W2_k, b2_k)
-            loss_k = cross_entropy(A2_k, Y_k)
-            acc_k  = precision(np.argmax(A2_k, axis=1), y_k)
-            hist_loss_parts[k].append(loss_k)
-            hist_acc_parts[k].append(acc_k)
-
-        # ── c) Promediar los pesos de todas las particiones ──────────────────
-        # Este promediado es la "sincronización" que hace especial a Diego.
-        # Después de esto, todos los pesos parciales se funden en uno solo.
-        #
-        #   W1_nuevo[i,j] = (1/K) · Σ_{k=1}^{K} W1_k[i,j]
-        #
-        # Los nuevos pesos globales incorporan lo aprendido por TODAS las
-        # particiones en esta época.
+        # ── e) Promediar los pesos de todas las particiones ──────────────
         W1, b1, W2, b2 = promediar_pesos(lista_pesos_epoca)
 
-        # ── d) Evaluación global ─────────────────────────────────────────────
-        # Evaluamos el modelo promediado sobre TODOS los datos de entrenamiento
-        # (no solo una partición) para tener métricas globales consistentes.
-        #
-        # Forward pass con todos los datos:
-        #   Z1 = X_train · W1 + b1    (N, 784) @ (784, 128) = (N, 128)
-        #   A1 = ReLU(Z1)             (N, 128)
-        #   Z2 = A1 · W2 + b2         (N, 128) @ (128, 10) = (N, 10)
-        #   A2 = Softmax(Z2)          (N, 10)
+        # ── f) Evaluación global ──────────────────────────────────────────
+        # Forward pass con todos los datos de entrenamiento
         Z1_all, A1_all, Z2_all, A2_all = forward(X_train, W1, b1, W2, b2)
 
-        # Pérdida global (cross-entropy sobre TODOS los datos de entrenamiento)
+        # Pérdida global
         loss = cross_entropy(A2_all, Y_train)
         historial_loss.append(loss)
 
-        # Precisión global sobre entrenamiento
+        # Precisión global en entrenamiento
         y_pred_train = np.argmax(A2_all, axis=1)
         acc_train = precision(y_pred_train, y_train)
         historial_acc.append(acc_train)
 
-        # Precisión en test (registrar CADA época para la gráfica)
+        # Precisión en test
         y_pred_test = predecir(X_test, W1, b1, W2, b2)
         acc_test = precision(y_pred_test, y_test)
         historial_acc_test.append(acc_test)
 
-        # ── Log de progreso ───────────────────────────────────────────────────
-        # Mostramos el detalle por partición + el resultado del promediado
+        # ── g) Log de progreso ────────────────────────────────────────────
+        tiempo_epoca = time.time() - tiempo_inicio_epoca
+        
         if epoca % intervalo_log == 0 or epoca == 1:
-            print(f"\n  {'─'*58}")
+            print(f"\n  {'─'*68}")
             print(f"  ÉPOCA {epoca}/{epocas} — RESULTADOS TRAS PROMEDIADO")
-            print(f"  {'─'*58}")
+            print(f"  {'─'*68}")
 
-            # Mostrar qué hizo cada partición individualmente
-            for k in range(num_particiones):
-                l_k = hist_loss_parts[k][-1]
-                a_k = hist_acc_parts[k][-1]
-                print(f"    Partición {k+1}: Loss={l_k:.4f}  Acc={a_k:.1f}%")
+            # Mostrar resultados de particiones individuales
+            for idx in range(num_particiones):
+                l_k = hist_loss_parts[idx][-1]
+                a_k = hist_acc_parts[idx][-1]
+                print(f"    [Proc {idx+1}] Partición {idx+1:2d}: Loss={l_k:.4f}  Acc={a_k:.1f}%")
 
-            # Mostrar el resultado del modelo promediado
-            print(f"  {'─'*58}")
-            print(f"    PROMEDIADO → Loss: {loss:.4f} │ "
+            # Mostrar resultado del modelo promediado
+            print(f"  {'─'*68}")
+            print(f"    ✓ PROMEDIADO → Loss: {loss:.4f} │ "
                   f"Acc Train: {acc_train:.1f}% │ "
-                  f"Acc Test: {acc_test:.1f}%")
+                  f"Acc Test: {acc_test:.1f}% │ "
+                  f"Tiempo: {tiempo_epoca:.2f}s")
 
-    # ── PASO 4: Evaluación final ─────────────────────────────────────────────
-    print("\n" + "=" * 60)
+    # ── PASO 4: Evaluación final ─────────────────────────────────────────
+    print("\n" + "=" * 70)
     print("  EVALUACIÓN FINAL")
-    print("=" * 60)
+    print("=" * 70)
     y_pred_test = predecir(X_test, W1, b1, W2, b2)
     acc_final = precision(y_pred_test, y_test)
-    print(f"\n  Precisión FINAL del modelo Diego en TEST: {acc_final:.2f}%")
+    print(f"\n  ✓ Precisión FINAL del modelo Multiprocessing en TEST: {acc_final:.2f}%")
 
-
-    # ── Graficar resultados ────────────────────────────────────────────────
+    # ── Graficar resultados ─────────────────────────────────────────────
     graficar_diego(historial_loss, historial_acc, historial_acc_test,
-                   hist_loss_parts, hist_acc_parts, NUM_PARTICIONES)
+                   hist_loss_parts, hist_acc_parts, num_particiones)
 
     # Guardar el modelo entrenado
-    y_pred_final = predecir(X_test, W1, b1, W2, b2)
-    acc_final = precision(y_pred_final, y_test)
     guardar_modelo(
         W1, b1, W2, b2,
-        nombre_modelo='DiegoNN',
+        nombre_modelo='MultiProcessingNN',
         precision_test=acc_final,
-        epocas=EPOCAS,
+        epocas=epocas,
         learning_rate=LEARNING_RATE,
-        info_extra={'num_particiones': NUM_PARTICIONES}
+        info_extra={
+            'num_particiones': num_particiones,
+            'max_workers': max_workers,
+            'nucleos_disponibles': cpu_count()
+        }
     )
 
     return 0
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -361,10 +411,10 @@ def entrenar_diego(X_train, Y_train, y_train, X_test, y_test,
 
 if __name__ == "__main__":
 
-    print("\n" + "=" * 60)
-    print("  ALGORITMO DE DIEGO — RED NEURONAL FEDERADA — MNIST")
-    print("  Sin librerías de ML, solo NumPy")
-    print("=" * 60)
+    print("\n" + "=" * 70)
+    print("  ALGORITMO MULTIPROCESSING — RED NEURONAL FEDERADA — MNIST")
+    print("  Sin librerías de ML, solo NumPy + multiprocessing")
+    print("=" * 70)
 
     # ── 1. Cargar el dataset ─────────────────────────────────────────────────
     X_all, y_all = cargar_mnist()
@@ -372,14 +422,15 @@ if __name__ == "__main__":
     # ── 2. Preprocesar: aplanar, normalizar, one-hot, split 70/30 ────────────
     X_train, Y_train, y_train, X_test, Y_test, y_test = preprocesar(X_all, y_all)
 
-    # ── 3. Ejecutar el Algoritmo de Diego ─────────────────────────────────────
-    entrenar_diego(
+    # ── 3. Ejecutar el Algoritmo Multiprocessing ──────────────────────────────
+    entrenar_multiprocessing(
         X_train, Y_train, y_train,
         X_test, y_test,
         num_particiones=NUM_PARTICIONES,
         epocas=EPOCAS,
         lr=LEARNING_RATE,
-        intervalo_log=INTERVALO_LOG
+        intervalo_log=INTERVALO_LOG,
+        max_workers=MAX_WORKERS
     )
 
 

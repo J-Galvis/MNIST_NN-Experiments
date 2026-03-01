@@ -21,14 +21,14 @@ import sys
 import os
 import numpy as np
 
-# ── Agregar el directorio de módulos al path para encontrar los módulos ─────────
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Modules'))
+# ── Agregar el directorio padre al path para acceder al paquete Utils ─────────
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from DatasetHandling import *
-from Graphics import *
-from Fuctions import *
-from WeightsHandling import *
-from ModelPersistence import guardar_modelo, cargar_modelo
+from Utils.DatasetHandling import *
+from Utils.Graphics import *
+from Utils.Fuctions import *
+from Utils.WeightsHandling import *
+from Utils.ModelPersistence import guardar_modelo, cargar_modelo
 
 
 # ─────────────────────────────────────────────────────────────────────────────

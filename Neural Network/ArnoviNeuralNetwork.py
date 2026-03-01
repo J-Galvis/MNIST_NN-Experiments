@@ -33,14 +33,14 @@ import sys
 import os
 import numpy as np
 
-# ── Agregar el directorio de módulos al path para encontrar los módulos ─────────
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Modules'))
+# ── Agregar el directorio padre al path para acceder al paquete Utils ─────────
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from DatasetHandling import cargar_mnist, preprocesar
-from Graphics import graficar_arnovi
-from Fuctions import forward, backward, cross_entropy, precision, predecir
-from WeightsHandling import inicializar_pesos, actualizar_pesos
-from ModelPersistence import guardar_modelo, cargar_modelo
+from Utils.DatasetHandling import cargar_mnist, preprocesar
+from Utils.Graphics import graficar_arnovi
+from Utils.Fuctions import forward, backward, cross_entropy, precision, predecir
+from Utils.WeightsHandling import inicializar_pesos, actualizar_pesos
+from Utils.ModelPersistence import guardar_modelo, cargar_modelo
 
 
 # ─────────────────────────────────────────────────────────────────────────────
