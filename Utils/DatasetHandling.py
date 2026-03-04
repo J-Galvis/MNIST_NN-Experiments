@@ -8,7 +8,7 @@ from torchvision import transforms
 # Usamos torchvision SOLO para descargar el dataset. Inmediatamente
 # convertimos todo a arrays de NumPy y no volvemos a usar PyTorch.
 
-def cargar_mnist():
+def cargar_mnist(data_dir='./data'):
     """
     Descarga MNIST con torchvision y lo convierte completamente a NumPy.
     Retorna X (imágenes) e y (etiquetas) como arrays de NumPy.
@@ -17,8 +17,8 @@ def cargar_mnist():
 
     # Descargamos train y test por separado (estándar MNIST)
     transform = transforms.ToTensor()  # solo para poder acceder a los datos
-    mnist_train = datasets.MNIST(root='./data', train=True,  download=True, transform=transform)
-    mnist_test  = datasets.MNIST(root='./data', train=False, download=True, transform=transform)
+    mnist_train = datasets.MNIST(root=data_dir, train=True,  download=True, transform=transform)
+    mnist_test  = datasets.MNIST(root=data_dir, train=False, download=True, transform=transform)
 
     # Convertimos a numpy de inmediato
     # .data son los píxeles: tensor de forma (60000, 28, 28) con valores 0-255
