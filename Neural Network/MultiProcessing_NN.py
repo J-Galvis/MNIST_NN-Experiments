@@ -15,29 +15,6 @@
   • Mantiene la sincronización por época (promediado al final de cada época)
   • Más eficiente en sistemas multi-núcleo
 
-FLUJO DEL ALGORITMO POR ÉPOCA
-──────────────────────────────
-  Para cada época e = 1, 2, ..., E:
-
-  ┌──────────────────────────────────────────────────────────────────┐
-  │  a) Guardar estado global actual (W1, b1, W2, b2)               │
-  │                                                                  │
-  │  b) Entrenar TODAS las particiones EN PARALELO:                  │
-  │     ├─ Proceso 1: train_on_batch(partición 1, pesos_globales)   │
-  │     ├─ Proceso 2: train_on_batch(partición 2, pesos_globales)   │
-  │     ├─ Proceso 3: train_on_batch(partición 3, pesos_globales)   │
-  │     └─ Proceso K: train_on_batch(partición K, pesos_globales)   │
-  │     → Los procesos se ejecutan simultáneamente                   │
-  │     → Máximo de procesos = MAX_WORKERS (núcleos disponibles)     │
-  │                                                                  │
-  │  c) Recopilar todos los pesos entrenados de las K particiones   │
-  │                                                                  │
-  │  d) Promediar los K conjuntos de pesos actualizados              │
-  │     W_global = (1/K) · Σ W_k                                     │
-  │                                                                  │
-  │  e) Evaluar el modelo promediado sobre TODOS los datos           │
-  │     para registrar loss y accuracy globales                      │
-  └──────────────────────────────────────────────────────────────────┘
 
 ARQUITECTURA (IDÉNTICA A BasicNeuralNetwork.py)
 ────────────────────────────────────────────────
