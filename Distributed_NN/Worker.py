@@ -1,104 +1,346 @@
+"""
+=============================================================================
+  WORKER — ENTRENAMIENTO NEURAL DISTRIBUIDO CON SOCKETS
+=============================================================================
+
+El worker:
+1. Se conecta al servidor
+2. Para cada época recibe:
+   - batch_id: identificador de su partición
+   - Pesos globales del servidor
+   - learning_rate
+   - init_signal / stop_signal
+3. Carga su partición de datos basada en batch_id
+4. Entrena una iteración con esos datos
+5. Calcula gradientes
+6. Envía gradientes al servidor
+7. Repite hasta recibir stop_signal
+
+El dataset se carga localmente y se particiona igual que en el servidor,
+de manera que cada worker sabe exactamente qué datos le corresponden.
+=============================================================================
+"""
+
 import sys
 import os
 import numpy as np
 import pickle
 import socket
-from multiprocessing import Pool, cpu_count
+import struct
 import time
 
 # ── Agregar el directorio padre al path para acceder al paquete Utils ─────────
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from Utils.DatasetHandling import cargar_mnist, preprocesar
-from Utils.Graphics import graficar_resultados, graficar_diego
-from Utils.Fuctions import forward, backward, cross_entropy, precision, predecir
-from Utils.WeightsHandling import inicializar_pesos, actualizar_pesos
-from Utils.ModelPersistence import guardar_modelo, cargar_modelo
+from Utils.Fuctions import forward, backward, cross_entropy, precision
+from Utils.WeightsHandling import inicializar_pesos
+from Protocol import MessageFromServer, MessageFromWorker, TrainingConfig
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FUNCIÓN WORKER PARA MULTIPROCESSING
+# CONFIGURACIÓN DEL WORKER
 # ─────────────────────────────────────────────────────────────────────────────
 
-def worker_entrenar_particion(args):
+SERVER_HOST = TrainingConfig.server_host
+SERVER_PORT = TrainingConfig.server_port
+SOCKET_TIMEOUT = TrainingConfig.socket_timeout
+NUM_PARTICIONES = TrainingConfig.num_particiones
+
+def send_message(sock, message):
     """
-    Función worker para entrenar una partición en un proceso separado.
+    Envía un mensaje serializado con pickle a través del socket.
     
-    Se ejecuta en un proceso hijo que entrena una partición con los pesos
-    globales recibidos y devuelve los pesos actualizados.
-    
-    Parámetros
-    ──────────
-    args : tupla
-        (id_particion, X_k, Y_k, y_k, W1_global, b1_global, W2_global, b2_global, lr)
-    
-    Retorna
-    ───────
-    tupla (id_particion, W1_actualizado, b1_actualizado, W2_actualizado, b2_actualizado,
-           loss_particion, acc_particion)
+    Formato:
+    [4 bytes: length (big-endian)] [message bytes]
     """
-    (idx_part, X_k, Y_k, y_k, W1_glob, b1_glob, W2_glob, b2_glob, lr) = args
+    data = pickle.dumps(message)
+    length = len(data)
     
-    # Copiar pesos para no mutar los originales (en el proceso hijo)
-    W1_local = np.copy(W1_glob)
-    b1_local = np.copy(b1_glob)
-    W2_local = np.copy(W2_glob)
-    b2_local = np.copy(b2_glob)
+    header = struct.pack('!I', length)
+    sock.sendall(header)
+    sock.sendall(data)
+
+
+def receive_message(sock):
+    """
+    Recibe un mensaje serializado con pickle a través del socket.
     
-    # Forward Pass
-    Z1, A1, Z2, A2 = forward(X_k, W1_local, b1_local, W2_local, b2_local)
+    Formato:
+    [4 bytes: length (big-endian)] [message bytes]
+    """
+    header = sock.recv(4)
+    if len(header) < 4:
+        raise ConnectionError("Conexión cerrada por servidor")
     
-    # Backward Pass
-    dW1, db1, dW2, db2 = backward(X_k, Y_k, Z1, A1, A2, W2_local)
+    length = struct.unpack('!I', header)[0]
     
-    # Actualizar Pesos
-    W1_local, b1_local, W2_local, b2_local = actualizar_pesos(
-        W1_local, b1_local, W2_local, b2_local,
-        dW1, db1, dW2, db2, lr
+    data = b''
+    while len(data) < length:
+        chunk = sock.recv(min(4096, length - len(data)))
+        if not chunk:
+            raise ConnectionError("Conexión cerrada durante recepción")
+        data += chunk
+    
+    message = pickle.loads(data)
+    return message
+
+
+def particionar_dataset(X_train, Y_train, y_train, num_particiones):
+    """
+    Divide el dataset de entrenamiento en K particiones iguales.
+    
+    IMPORTANTE: Usa la MISMA lógica que el servidor para garantizar
+    que cada worker obtenga exactamente la misma partición.
+    """
+    N = X_train.shape[0]
+    indices = np.random.permutation(N)
+    
+    X_mezclado = X_train[indices]
+    Y_mezclado = Y_train[indices]
+    y_mezclado = y_train[indices]
+    
+    X_partes = np.array_split(X_mezclado, num_particiones)
+    Y_partes = np.array_split(Y_mezclado, num_particiones)
+    y_partes = np.array_split(y_mezclado, num_particiones)
+    
+    particiones = []
+    for k in range(num_particiones):
+        particiones.append((X_partes[k], Y_partes[k], y_partes[k]))
+    
+    return particiones
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WORKER PRINCIPAL
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DistributedTrainingWorker:
+    """
+    Worker de Entrenamiento Distribuido.
+    
+    Se conecta al servidor y entrena su asignada partición del dataset.
+    """
+    
+    def __init__(self, server_host, server_port, server_particiones):
+        self.server_host = server_host
+        self.server_port = server_port
+        
+        # Datos
+        self.num_particiones = server_particiones
+        self.particiones = None
+        self.X_k = None
+        self.Y_k = None
+        self.y_k = None
+        self.batch_id = None
+        
+        # Socket
+        self.socket = None
+    
+    def connect_to_server(self):
+        """Se conecta al servidor."""
+        print(f"\n{'='*70}")
+        print(f"  WORKER — CONECTANDO AL SERVIDOR")
+        print(f"{'='*70}")
+        print(f"  Intentando conectar a {self.server_host}:{self.server_port}...")
+        
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.settimeout(SOCKET_TIMEOUT)
+            self.socket.connect((self.server_host, self.server_port))
+            print(f"  ✓ Conectado al servidor exitosamente")
+            
+        except ConnectionRefusedError:
+            print(f"  ✗ Conexión rechazada. ¿El servidor está ejecutándose?")
+            raise
+        except socket.timeout:
+            print(f"  ✗ Timeout conectando al servidor")
+            raise
+        except Exception as e:
+            print(f"  ✗ Error conectando: {e}")
+            raise
+    
+    def load_dataset(self):
+        """
+        Carga el dataset MNIST y lo particiona.
+        
+        Cada worker obtendrá su partición basándose en batch_id
+        (asignado por el servidor).
+        """
+        print(f"\n{'='*70}")
+        print(f"  PASO 1: CARGANDO DATASET MNIST")
+        print(f"{'='*70}")
+
+        X_all, y_all = cargar_mnist()
+        X_train, Y_train, y_train, _, _, _ = preprocesar(X_all, y_all)
+        
+        # Particionar igual que el servidor
+        self.particiones = particionar_dataset(X_train, Y_train, y_train, self.num_particiones)
+        print(f"  ✓ Dataset cargado: {X_train.shape[0]} muestras")
+        print(f"  ✓ Dataset particionado en {self.num_particiones} particiones (local)")
+
+    
+    def get_batch(self, batch_id):
+        """
+        Obtiene la partición asignada basada en batch_id.
+        
+        batch_id es asignado por el servidor como el orden de conexión.
+        """
+        if batch_id >= len(self.particiones):
+            raise ValueError(f"batch_id {batch_id} fuera de rango [0, {len(self.particiones)-1}]")
+        
+        self.batch_id = batch_id
+        self.X_k, self.Y_k, self.y_k = self.particiones[batch_id]
+        
+        print(f"\n{'='*70}")
+        print(f"  ASIGNACIÓN DE DATOS")
+        print(f"{'='*70}")
+        print(f"  Worker batch_id : {batch_id}")
+        print(f"  Datos asignados : {self.X_k.shape[0]} muestras")
+        print(f"  Clases presentes: {np.unique(self.y_k)}")
+    
+    def train_epoch(self, epoch, W1_global, b1_global, W2_global, b2_global, learning_rate):
+        """
+        Entrena una época con su partición asignada.
+        
+        Entrenamiento = Forward + Backward + Gradient Computation
+        
+        Retorna:
+            (dW1, db1, dW2, db2, loss, accuracy, training_time)
+        """
+        tiempo_inicio = time.time()
+        
+        # Forward Pass
+        Z1, A1, Z2, A2 = forward(self.X_k, W1_global, b1_global, W2_global, b2_global)
+        
+        # Calcular pérdida
+        loss = cross_entropy(A2, self.Y_k)
+        
+        # Calcular precisión
+        y_pred = np.argmax(A2, axis=1)
+        acc = precision(y_pred, self.y_k)
+        
+        # Backward Pass — calcular gradientes
+        dW1, db1, dW2, db2 = backward(self.X_k, self.Y_k, Z1, A1, A2, W2_global)
+        
+        tiempo_entrenamiento = time.time() - tiempo_inicio
+        
+        return dW1, db1, dW2, db2, loss, acc, tiempo_entrenamiento
+    
+    def training_loop(self):
+        """
+        Bucle principal del worker.
+        
+        Recibe mensajes del servidor, entrena, envía gradientes.
+        Continúa hasta recibir stop_signal.
+        """
+        print(f"\n{'='*70}")
+        print(f"  PASO 2: ESPERANDO INSTRUCCIONES DEL SERVIDOR")
+        print(f"{'='*70}\n") 
+        
+        while True:
+            try:
+                # Recibir mensaje del servidor
+                print(f"  [Worker {self.batch_id}] Esperando mensaje...")
+                message = receive_message(self.socket)
+
+                # Asignar batch si es la primera vez
+                if self.batch_id is None:
+                    self.get_batch(message.batch_id)
+                
+                print(f"  ✓ Recibido: epoch={message.epoch}, init={message.init_signal}, "
+                      f"stop={message.stop_signal}")
+                
+                # Entrenar
+                print(f"    Entrenando epoch {message.epoch}...")
+                dW1, db1, dW2, db2, loss, acc, train_time = self.train_epoch(
+                    message.epoch,
+                    message.W1, message.b1, message.W2, message.b2,
+                    message.learning_rate
+                )
+                
+                # Crear respuesta
+                response = MessageFromWorker(
+                    worker_id=self.batch_id,
+                    batch_id=self.batch_id,
+                    epoch=message.epoch,
+                    dW1=dW1,
+                    db1=db1,
+                    dW2=dW2,
+                    db2=db2,
+                    loss=loss,
+                    accuracy=acc,
+                    training_time=train_time
+                )
+                
+                # Enviar gradientes
+                print(f"    Enviando gradientes... (Loss={loss:.4f}, Acc={acc:.1f}%)")
+                send_message(self.socket, response)
+                
+                # Verificar stop signal
+                if message.stop_signal:
+                    print(f"\n  ✓ Stop signal recibido. Terminando worker.")
+                    break
+                
+            except ConnectionError as e:
+                print(f"\n  ✗ Conexión perdida con servidor: {e}")
+                break
+            except socket.timeout:
+                print(f"\n  ✗ Timeout esperando mensaje del servidor")
+                break
+            except Exception as e:
+                print(f"\n  ✗ Error en bucle de entrenamiento: {e}")
+                import traceback
+                traceback.print_exc()
+                break
+    
+    def shutdown(self):
+        """Cierra la conexión."""
+        if self.socket:
+            try:
+                self.socket.close()
+                print(f"\n  ✓ Conexión cerrada")
+            except:
+                pass
+    
+    def run(self):
+        """Ejecución principal del worker."""
+        print("\n" + "=" * 70)
+        print("  WORKER — ENTRENAMIENTO NEURONAL DISTRIBUIDO")
+        print("  Conectado a Servidor via Sockets")
+        print("=" * 70)
+        
+        try:
+            # Conectar al servidor
+            self.connect_to_server()
+            
+            self.load_dataset()
+            
+            # Bucle de entrenamiento
+            self.training_loop()
+            
+        except KeyboardInterrupt:
+            print("\n\n  ✗ Worker interrumpido por usuario")
+        except Exception as e:
+            print(f"\n\n  ✗ Error crítico: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self.shutdown()
+            print(f"\n{'='*70}")
+            print(f"  WORKER FINALIZADO")
+            print(f"{'='*70}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PUNTO DE ENTRADA PRINCIPAL
+# ─────────────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    
+    worker = DistributedTrainingWorker(
+        server_host=SERVER_HOST,
+        server_port=SERVER_PORT,
+        server_particiones=NUM_PARTICIONES
     )
     
-    # Calcular métricas de la partición
-    loss_k = cross_entropy(A2, Y_k)
-    acc_k = precision(np.argmax(A2, axis=1), y_k)
-    
-    return (idx_part, W1_local, b1_local, W2_local, b2_local, loss_k, acc_k)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PASO 2: ENTRENAR UNA PARTICIÓN POR UN SOLO PASO (train_on_batch)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def train_on_batch(X_k, Y_k, W1, b1, W2, b2, lr):
-    """
-    Entrena la red con UN SOLO batch de datos (una partición) y retorna
-    los pesos actualizados.
-
-    Parámetros
-    ──────────
-    X_k  : np.array, forma (N_k, 784) — datos de la partición k
-    Y_k  : np.array, forma (N_k, 10)  — etiquetas one-hot de la partición k
-    W1, b1, W2, b2 : pesos de la red (se COPIAN internamente)
-    lr   : float — learning rate
-
-    Retorna
-    ───────
-    W1, b1, W2, b2 : pesos actualizados después de una pasada
-    """
-    # ── Copiar pesos para no mutar los originales ────────────────────────────
-    # Cada partición trabaja con su propia copia independiente
-    W1_local = np.copy(W1)
-    b1_local = np.copy(b1)
-    W2_local = np.copy(W2)
-    b2_local = np.copy(b2)
-
-    # ── Forward Pass ─────────────────────────────────────────────────────────
-    Z1, A1, Z2, A2 = forward(X_k, W1_local, b1_local, W2_local, b2_local)
-
-    # ── Backward Pass ────────────────────────────────────────────────────────
-    dW1, db1, dW2, db2 = backward(X_k, Y_k, Z1, A1, A2, W2_local)
-
-    # ── Actualizar Pesos ─────────────────────────────────────────────────────
-    W1_local, b1_local, W2_local, b2_local = actualizar_pesos(
-        W1_local, b1_local, W2_local, b2_local,
-        dW1, db1, dW2, db2, lr
-    )
-
-    return W1_local, b1_local, W2_local, b2_local
+    worker.run()
