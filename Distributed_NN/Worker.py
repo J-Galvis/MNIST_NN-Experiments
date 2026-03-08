@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from Utils.DatasetHandling import cargar_mnist, preprocesar
 from Utils.Fuctions import forward, backward, cross_entropy, precision
 from Utils.WeightsHandling import inicializar_pesos
-from Protocol import MessageFromServer, MessageFromWorker, TrainingConfig
+from Protocol import MessageFromServer, MessageFromWorker, WorkerReadyMessage, TrainingConfig, RANDOM_SEED
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN DEL WORKER
@@ -89,10 +89,15 @@ def particionar_dataset(X_train, Y_train, y_train, num_particiones):
     """
     Divide el dataset de entrenamiento en K particiones iguales.
     
-    IMPORTANTE: Usa la MISMA lógica que el servidor para garantizar
+    IMPORTANTE: Usa la MISMA RANDOM_SEED que el servidor para garantizar
     que cada worker obtenga exactamente la misma partición.
     """
     N = X_train.shape[0]
+    
+    # ┌─ SEMILLA FIJA PARA SINCRONIZACIÓN ─┐
+    np.random.seed(RANDOM_SEED)
+    # └────────────────────────────────────┘
+    
     indices = np.random.permutation(N)
     
     X_mezclado = X_train[indices]
@@ -249,6 +254,19 @@ class DistributedTrainingWorker:
                 
                 print(f"  ✓ Recibido: epoch={message.epoch}, init={message.init_signal}, "
                       f"stop={message.stop_signal}")
+                
+                # ┌─── HANDSHAKE: Responder a mensaje de sincronización ───┐
+                if message.init_signal and message.epoch == 0:
+                    ready_msg = WorkerReadyMessage(
+                        worker_id=self.batch_id,
+                        batch_id=self.batch_id,
+                        dataset_size=self.X_k.shape[0]
+                    )
+                    print(f"    → Enviando confirmación de listo al servidor...")
+                    send_message(self.socket, ready_msg)
+                    print(f"    ✓ Confirmación enviada")
+                    continue  # Volver a esperar el primer mensaje de entrenamiento
+                # └─────────────────────────────────────────────────┘
                 
                 # Entrenar
                 print(f"    Entrenando epoch {message.epoch}...")

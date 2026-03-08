@@ -10,6 +10,12 @@ from dataclasses import dataclass
 from typing import Tuple, Optional
 import numpy as np
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CONFIGURACIÓN GLOBAL
+# ─────────────────────────────────────────────────────────────────────────────
+
+RANDOM_SEED = 42  # Semilla fija para reproducibilidad y sincronización
+
 
 @dataclass
 class MessageFromServer:
@@ -76,6 +82,28 @@ class MessageFromWorker:
 
 
 @dataclass
+class WorkerReadyMessage:
+    """
+    Mensaje de confirmación enviado por el worker después de sincronización.
+    
+    Confirma que el worker ha recibido correctamente el mensaje de sincronización
+    y está listo para comenzar el entrenamiento.
+    
+    Atributos:
+        worker_id: int - Identificador del worker
+        batch_id: int - Batch_id asignado
+        dataset_size: int - Tamaño de la partición asignada
+    """
+    worker_id: int
+    batch_id: int
+    dataset_size: int
+    
+    def __repr__(self):
+        return (f"WorkerReadyMessage(worker_id={self.worker_id}, "
+                f"batch_id={self.batch_id}, dataset_size={self.dataset_size})")
+
+
+@dataclass
 class TrainingConfig:
     """
     Configuración de entrenamiento compartida.
@@ -89,7 +117,7 @@ class TrainingConfig:
         server_port: int - Puerto del servidor
         batch_size: int - Tamaño de cada batch (muestras por worker)
     """
-    num_particiones: int = 4
+    num_particiones: int = 1
     epocas: int = 100
     learning_rate: float = 0.1
     intervalo_log: int = 10

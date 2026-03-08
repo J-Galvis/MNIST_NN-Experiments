@@ -28,11 +28,10 @@ from typing import Dict, List, Tuple
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from Utils.DatasetHandling import cargar_mnist, preprocesar
-from Utils.Graphics import graficar_diego
 from Utils.Fuctions import forward, backward, cross_entropy, precision, predecir
 from Utils.WeightsHandling import inicializar_pesos, actualizar_pesos
 from Utils.ModelPersistence import guardar_modelo
-from Protocol import MessageFromServer, MessageFromWorker, TrainingConfig
+from Protocol import MessageFromServer, MessageFromWorker, WorkerReadyMessage, TrainingConfig, RANDOM_SEED
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN DEL SERVIDOR
@@ -54,9 +53,17 @@ def particionar_dataset(X_train, Y_train, y_train, num_particiones):
     """
     Divide el dataset de entrenamiento en K particiones iguales.
     
+    IMPORTANTE: Usa RANDOM_SEED para garantizar que el servidor y workers
+    particionen el dataset exactamente de la misma manera.
+    
     Retorna lista de tuplas (X_k, Y_k, y_k)
     """
     N = X_train.shape[0]
+    
+    # ┌─ SEMILLA FIJA PARA SINCRONIZACIÓN ─┐
+    np.random.seed(RANDOM_SEED)
+    # └────────────────────────────────────┘
+    
     indices = np.random.permutation(N)
     
     X_mezclado = X_train[indices]
@@ -71,7 +78,7 @@ def particionar_dataset(X_train, Y_train, y_train, num_particiones):
     for k in range(num_particiones):
         particiones.append((X_partes[k], Y_partes[k], y_partes[k]))
     
-    print(f"\n  Dataset dividido en {num_particiones} particiones:")
+    print(f"\n  Dataset dividido en {num_particiones} particiones (SEED={RANDOM_SEED}):")
     for k, (X_k, Y_k, y_k) in enumerate(particiones):
         digitos_unicos = np.unique(y_k)
         print(f"    Partición {k+1}: {X_k.shape[0]:5d} muestras  │  "
@@ -252,10 +259,26 @@ class DistributedTrainingServer:
                 sock = self.worker_sockets[batch_id]
                 send_message(sock, message)
                 
-                print(f"    ✓ Sincronización enviada a worker {batch_id}")
+                print(f"    → Sincronización enviada a worker {batch_id}")
                 
             except Exception as e:
                 print(f"    ✗ Error sincronizando worker {batch_id}: {e}")
+                raise
+        
+        # FASE 3: Esperar confirmación (handshake) de todos los workers
+        print(f"\n  {'─'*68}")
+        print(f"  FASE DE HANDSHAKE — Esperando confirmación de workers")
+        print(f"  {'─'*68}")
+        
+        for batch_id in range(self.num_particiones):
+            try:
+                sock = self.worker_sockets[batch_id]
+                ready_msg: WorkerReadyMessage = receive_message(sock)
+                
+                print(f"    ✓ Worker {batch_id} listo (dataset_size={ready_msg.dataset_size})")
+                
+            except Exception as e:
+                print(f"    ✗ Error esperando confirmación de worker {batch_id}: {e}")
                 raise
         
         print(f"  ✓ Todos los workers sincronizados y listos para entrenar")
@@ -457,10 +480,6 @@ class DistributedTrainingServer:
         y_pred_test = predecir(self.X_test, self.W1, self.b1, self.W2, self.b2)
         acc_final = precision(y_pred_test, self.y_test)
         print(f"\n  ✓ Precisión FINAL del modelo en TEST: {acc_final:.2f}%")
-        
-        # Graficar resultados
-        graficar_diego(self.historial_loss, self.historial_acc, self.historial_acc_test,
-                      self.hist_loss_parts, self.hist_acc_parts, self.num_particiones)
         
         # Guardar modelo
         guardar_modelo(

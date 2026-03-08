@@ -6,7 +6,7 @@ from datetime import datetime
 
 
 # ── Carpeta donde se guardan los modelos ─────────────────────────────────────
-CARPETA_MODELOS = os.path.join(os.path.dirname(__file__), 'modelos_guardados')
+CARPETA_MODELOS = os.path.join(os.path.dirname(__file__), '../modelos_guardados')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
