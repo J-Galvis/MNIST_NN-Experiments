@@ -32,10 +32,11 @@ import time
 # ── Agregar el directorio padre al path para acceder al paquete Utils ─────────
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from Utils.DatasetHandling import cargar_mnist, preprocesar
+from Utils.DatasetHandling import cargar_mnist, preprocesar, particionar_dataset
 from Utils.Fuctions import forward, backward, cross_entropy, precision
 from Utils.WeightsHandling import inicializar_pesos
-from Protocol import MessageFromServer, MessageFromWorker, WorkerReadyMessage, TrainingConfig, RANDOM_SEED
+from Protocol import MessageFromServer, MessageFromWorker, WorkerReadyMessage, TrainingConfig
+from messageHandling import send_message, receive_message
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN DEL WORKER
@@ -45,75 +46,7 @@ SERVER_HOST = TrainingConfig.server_host
 SERVER_PORT = TrainingConfig.server_port
 SOCKET_TIMEOUT = TrainingConfig.socket_timeout
 NUM_PARTICIONES = TrainingConfig.num_particiones
-
-def send_message(sock, message):
-    """
-    Envía un mensaje serializado con pickle a través del socket.
-    
-    Formato:
-    [4 bytes: length (big-endian)] [message bytes]
-    """
-    data = pickle.dumps(message)
-    length = len(data)
-    
-    header = struct.pack('!I', length)
-    sock.sendall(header)
-    sock.sendall(data)
-
-
-def receive_message(sock):
-    """
-    Recibe un mensaje serializado con pickle a través del socket.
-    
-    Formato:
-    [4 bytes: length (big-endian)] [message bytes]
-    """
-    header = sock.recv(4)
-    if len(header) < 4:
-        raise ConnectionError("Conexión cerrada por servidor")
-    
-    length = struct.unpack('!I', header)[0]
-    
-    data = b''
-    while len(data) < length:
-        chunk = sock.recv(min(4096, length - len(data)))
-        if not chunk:
-            raise ConnectionError("Conexión cerrada durante recepción")
-        data += chunk
-    
-    message = pickle.loads(data)
-    return message
-
-
-def particionar_dataset(X_train, Y_train, y_train, num_particiones):
-    """
-    Divide el dataset de entrenamiento en K particiones iguales.
-    
-    IMPORTANTE: Usa la MISMA RANDOM_SEED que el servidor para garantizar
-    que cada worker obtenga exactamente la misma partición.
-    """
-    N = X_train.shape[0]
-    
-    # ┌─ SEMILLA FIJA PARA SINCRONIZACIÓN ─┐
-    np.random.seed(RANDOM_SEED)
-    # └────────────────────────────────────┘
-    
-    indices = np.random.permutation(N)
-    
-    X_mezclado = X_train[indices]
-    Y_mezclado = Y_train[indices]
-    y_mezclado = y_train[indices]
-    
-    X_partes = np.array_split(X_mezclado, num_particiones)
-    Y_partes = np.array_split(Y_mezclado, num_particiones)
-    y_partes = np.array_split(y_mezclado, num_particiones)
-    
-    particiones = []
-    for k in range(num_particiones):
-        particiones.append((X_partes[k], Y_partes[k], y_partes[k]))
-    
-    return particiones
-
+SERVER_RANDOM_SEED = TrainingConfig.server_random_seed
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WORKER PRINCIPAL
@@ -126,7 +59,7 @@ class DistributedTrainingWorker:
     Se conecta al servidor y entrena su asignada partición del dataset.
     """
     
-    def __init__(self, server_host, server_port, server_particiones):
+    def __init__(self, server_host, server_port, server_particiones,server_random_seed):
         self.server_host = server_host
         self.server_port = server_port
         
@@ -140,6 +73,7 @@ class DistributedTrainingWorker:
         
         # Socket
         self.socket = None
+        self.random_seed = server_random_seed
     
     def connect_to_server(self):
         """Se conecta al servidor."""
@@ -179,7 +113,7 @@ class DistributedTrainingWorker:
         X_train, Y_train, y_train, _, _, _ = preprocesar(X_all, y_all)
         
         # Particionar igual que el servidor
-        self.particiones = particionar_dataset(X_train, Y_train, y_train, self.num_particiones)
+        self.particiones = particionar_dataset(X_train, Y_train, y_train, self.num_particiones, self.random_seed)
         print(f"  ✓ Dataset cargado: {X_train.shape[0]} muestras")
         print(f"  ✓ Dataset particionado en {self.num_particiones} particiones (local)")
 
@@ -358,7 +292,8 @@ if __name__ == "__main__":
     worker = DistributedTrainingWorker(
         server_host=SERVER_HOST,
         server_port=SERVER_PORT,
-        server_particiones=NUM_PARTICIONES
+        server_particiones=NUM_PARTICIONES,
+        server_random_seed=SERVER_RANDOM_SEED
     )
     
     worker.run()

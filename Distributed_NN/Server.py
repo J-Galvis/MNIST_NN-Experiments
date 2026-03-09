@@ -27,11 +27,12 @@ from typing import Dict, List, Tuple
 # ── Agregar el directorio padre al path para acceder al paquete Utils ─────────
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from Utils.DatasetHandling import cargar_mnist, preprocesar
+from Utils.DatasetHandling import cargar_mnist, preprocesar, particionar_dataset
 from Utils.Fuctions import forward, backward, cross_entropy, precision, predecir
 from Utils.WeightsHandling import inicializar_pesos, actualizar_pesos
 from Utils.ModelPersistence import guardar_modelo
-from Protocol import MessageFromServer, MessageFromWorker, WorkerReadyMessage, TrainingConfig, RANDOM_SEED
+from Protocol import MessageFromServer, MessageFromWorker, WorkerReadyMessage, TrainingConfig
+from messageHandling import send_message, receive_message
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN DEL SERVIDOR
@@ -44,47 +45,7 @@ INTERVALO_LOG = TrainingConfig.intervalo_log
 SERVER_HOST = TrainingConfig.server_host
 SERVER_PORT = TrainingConfig.server_port
 SOCKET_TIMEOUT = TrainingConfig.socket_timeout
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FUNCIONES AUXILIARES
-# ─────────────────────────────────────────────────────────────────────────────
-
-def particionar_dataset(X_train, Y_train, y_train, num_particiones):
-    """
-    Divide el dataset de entrenamiento en K particiones iguales.
-    
-    IMPORTANTE: Usa RANDOM_SEED para garantizar que el servidor y workers
-    particionen el dataset exactamente de la misma manera.
-    
-    Retorna lista de tuplas (X_k, Y_k, y_k)
-    """
-    N = X_train.shape[0]
-    
-    # ┌─ SEMILLA FIJA PARA SINCRONIZACIÓN ─┐
-    np.random.seed(RANDOM_SEED)
-    # └────────────────────────────────────┘
-    
-    indices = np.random.permutation(N)
-    
-    X_mezclado = X_train[indices]
-    Y_mezclado = Y_train[indices]
-    y_mezclado = y_train[indices]
-    
-    X_partes = np.array_split(X_mezclado, num_particiones)
-    Y_partes = np.array_split(Y_mezclado, num_particiones)
-    y_partes = np.array_split(y_mezclado, num_particiones)
-    
-    particiones = []
-    for k in range(num_particiones):
-        particiones.append((X_partes[k], Y_partes[k], y_partes[k]))
-    
-    print(f"\n  Dataset dividido en {num_particiones} particiones (SEED={RANDOM_SEED}):")
-    for k, (X_k, Y_k, y_k) in enumerate(particiones):
-        digitos_unicos = np.unique(y_k)
-        print(f"    Partición {k+1}: {X_k.shape[0]:5d} muestras  │  "
-              f"Dígitos presentes: {digitos_unicos}")
-    
-    return particiones
+SERVER_RANDOM_SEED = TrainingConfig.server_random_seed
 
 
 def promediar_gradientes(lista_gradientes):
@@ -110,51 +71,6 @@ def promediar_gradientes(lista_gradientes):
     db2_prom = np.mean(np.array(lista_db2), axis=0)
     
     return dW1_prom, db1_prom, dW2_prom, db2_prom
-
-
-def send_message(sock, message):
-    """
-    Envía un mensaje serializado con pickle a través del socket.
-    
-    Formato:
-    [4 bytes: length (big-endian)] [message bytes]
-    """
-    data = pickle.dumps(message)
-    length = len(data)
-    
-    # Enviar longitud primero
-    header = struct.pack('!I', length)
-    sock.sendall(header)
-    
-    # Enviar datos
-    sock.sendall(data)
-
-
-def receive_message(sock):
-    """
-    Recibe un mensaje serializado con pickle a través del socket.
-    
-    Formato:
-    [4 bytes: length (big-endian)] [message bytes]
-    """
-    # Recibir longitud
-    header = sock.recv(4)
-    if len(header) < 4:
-        raise ConnectionError("Conexión cerrada por worker")
-    
-    length = struct.unpack('!I', header)[0]
-    
-    # Recibir datos
-    data = b''
-    while len(data) < length:
-        chunk = sock.recv(min(4096, length - len(data)))
-        if not chunk:
-            raise ConnectionError("Conexión cerrada durante recepción")
-        data += chunk
-    
-    message = pickle.loads(data)
-    return message
-
 
 
 # ─────────────────────────────────────────────────────────────────────────────

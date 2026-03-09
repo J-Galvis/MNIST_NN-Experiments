@@ -10,12 +10,6 @@ from dataclasses import dataclass
 from typing import Tuple, Optional
 import numpy as np
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CONFIGURACIÓN GLOBAL
-# ─────────────────────────────────────────────────────────────────────────────
-
-RANDOM_SEED = 42  # Semilla fija para reproducibilidad y sincronización
-
 
 @dataclass
 class MessageFromServer:
@@ -124,3 +118,4 @@ class TrainingConfig:
     server_host: str = 'localhost'
     server_port: int = 9999
     socket_timeout: int = 60  # segundos
+    server_random_seed: int = 42  # Semilla para sincronización de particiones

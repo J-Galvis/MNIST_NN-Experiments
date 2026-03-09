@@ -86,3 +86,41 @@ def preprocesar(X_all, y_all, fraccion_entrenamiento=0.7):
     print(f"  Forma de Y_train          : {Y_train.shape}  ← (muestras, clases)")
 
     return X_train, Y_train, y_train, X_test, Y_test, y_test
+
+
+def particionar_dataset(X_train, Y_train, y_train, num_particiones, random_seed):
+    """
+    Divide el dataset de entrenamiento en K particiones iguales.
+    
+    IMPORTANTE: Usa RANDOM_SEED para garantizar que el servidor y workers
+    particionen el dataset exactamente de la misma manera.
+    
+    Retorna lista de tuplas (X_k, Y_k, y_k)
+    """
+    N = X_train.shape[0]
+    
+    # ┌─ SEMILLA FIJA PARA SINCRONIZACIÓN ─┐
+    np.random.seed(random_seed)
+    # └────────────────────────────────────┘
+    
+    indices = np.random.permutation(N)
+    
+    X_mezclado = X_train[indices]
+    Y_mezclado = Y_train[indices]
+    y_mezclado = y_train[indices]
+    
+    X_partes = np.array_split(X_mezclado, num_particiones)
+    Y_partes = np.array_split(Y_mezclado, num_particiones)
+    y_partes = np.array_split(y_mezclado, num_particiones)
+    
+    particiones = []
+    for k in range(num_particiones):
+        particiones.append((X_partes[k], Y_partes[k], y_partes[k]))
+    
+    print(f"\n  Dataset dividido en {num_particiones} particiones (SEED={random_seed}):")
+    for k, (X_k, Y_k, y_k) in enumerate(particiones):
+        digitos_unicos = np.unique(y_k)
+        print(f"    Partición {k+1}: {X_k.shape[0]:5d} muestras  │  "
+              f"Dígitos presentes: {digitos_unicos}")
+    
+    return particiones
