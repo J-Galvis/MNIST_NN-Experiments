@@ -20,6 +20,7 @@ ARQUITECTURA
 import sys
 import os
 import numpy as np
+import time
 
 # ── Agregar el directorio padre al path para acceder al paquete Utils ─────────
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -51,6 +52,8 @@ def entrenar(X_train, Y_train, y_train, X_test, y_test,
     Ventaja del full-batch: gradientes estables y exactos.
     Desventaja: más lento por época al procesar todas las muestras a la vez.
     """
+    tiempo_inicio = time.time()
+    
     print("\n" + "="*60)
     print("  INICIALIZANDO PESOS")
     print("="*60)
@@ -114,7 +117,8 @@ def entrenar(X_train, Y_train, y_train, X_test, y_test,
         nombre_modelo='BasicNN',
         precision_test=acc_final,
         epocas=100,
-        learning_rate=0.4
+        learning_rate=0.4,
+        training_time=tiempo_total
     )
 
     return 0
@@ -140,6 +144,7 @@ if __name__ == "__main__":
     # 3. Entrenamos la red neuronal
     #    epocas=100: pasamos 100 veces por todos los datos
     #    lr=0.4:     learning rate que controla el tamaño del paso
+    tiempo_inicio_entrenamiento = time.time()
     entrenar(
         X_train, Y_train, y_train,
         X_test, y_test,
@@ -147,3 +152,4 @@ if __name__ == "__main__":
         lr=0.4,
         intervalo_log=10
     )
+    tiempo_entrenamiento = time.time() - tiempo_inicio_entrenamiento

@@ -99,18 +99,6 @@ class WorkerReadyMessage:
 
 @dataclass
 class TrainingConfig:
-    """
-    Configuración de entrenamiento compartida.
-    
-    Atributos:
-        num_particiones: int - Número de particiones del dataset
-        epocas: int - Número total de épocas
-        learning_rate: float - Tasa de aprendizaje
-        intervalo_log: int - Intervalo para log de progreso
-        server_host: str - Host del servidor
-        server_port: int - Puerto del servidor
-        batch_size: int - Tamaño de cada batch (muestras por worker)
-    """
     num_particiones: int = 1
     epocas: int = 100
     learning_rate: float = 0.1
@@ -118,4 +106,4 @@ class TrainingConfig:
     server_host: str = 'localhost'
     server_port: int = 9999
     socket_timeout: int = 60  # segundos
-    server_random_seed: int = 42  # Semilla para sincronización de particiones
+    server_random_seed: int = 42  # Semilla

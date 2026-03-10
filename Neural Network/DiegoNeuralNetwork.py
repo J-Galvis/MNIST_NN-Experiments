@@ -47,6 +47,7 @@ ARQUITECTURA (IDÉNTICA A BasicNeuralNetwork.py)
 import sys
 import os
 import numpy as np
+import time
 
 # ── Agregar el directorio padre al path para acceder al paquete Utils ─────────
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -62,9 +63,9 @@ from Utils.ModelPersistence import guardar_modelo, cargar_modelo
 # HIPERPARÁMETROS DEL ALGORITMO DE DIEGO
 # ─────────────────────────────────────────────────────────────────────────────
 
-NUM_PARTICIONES = 5     # Número de subconjuntos en que dividimos los datos
+NUM_PARTICIONES = 3     # Número de subconjuntos en que dividimos los datos
 EPOCAS = 100            # Número total de épocas (rondas de sincronización)
-LEARNING_RATE = 0.1     # Tasa de aprendizaje
+LEARNING_RATE = 0.3     # Tasa de aprendizaje
 INTERVALO_LOG = 10      # Cada cuántas épocas imprimimos progreso
 
 
@@ -195,6 +196,7 @@ def entrenar_diego(X_train, Y_train, y_train, X_test, y_test,
     """
     Ejecuta el Algoritmo de Diego completo.
     """
+    tiempo_inicio = time.time()
 
     print("\n" + "=" * 60)
     print("  ALGORITMO DE DIEGO — ENTRENAMIENTO FEDERADO POR ÉPOCA")
@@ -328,12 +330,15 @@ def entrenar_diego(X_train, Y_train, y_train, X_test, y_test,
                   f"Acc Test: {acc_test:.1f}%")
 
     # ── PASO 4: Evaluación final ─────────────────────────────────────────────
+    tiempo_total = time.time() - tiempo_inicio
+    
     print("\n" + "=" * 60)
     print("  EVALUACIÓN FINAL")
     print("=" * 60)
     y_pred_test = predecir(X_test, W1, b1, W2, b2)
     acc_final = precision(y_pred_test, y_test)
     print(f"\n  Precisión FINAL del modelo Diego en TEST: {acc_final:.2f}%")
+    print(f"  Tiempo total de entrenamiento: {tiempo_total:.2f}s")
 
 
     # ── Graficar resultados ────────────────────────────────────────────────
@@ -349,6 +354,7 @@ def entrenar_diego(X_train, Y_train, y_train, X_test, y_test,
         precision_test=acc_final,
         epocas=EPOCAS,
         learning_rate=LEARNING_RATE,
+        training_time=tiempo_total,
         info_extra={'num_particiones': NUM_PARTICIONES}
     )
 

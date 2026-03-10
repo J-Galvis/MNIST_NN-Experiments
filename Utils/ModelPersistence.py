@@ -14,7 +14,7 @@ CARPETA_MODELOS = os.path.join(os.path.dirname(__file__), '../modelos_guardados'
 # ─────────────────────────────────────────────────────────────────────────────
 
 def guardar_modelo(W1, b1, W2, b2, nombre_modelo, precision_test=None,
-                   epocas=None, learning_rate=None, info_extra=None):
+                   epocas=None, learning_rate=None, training_time=None, info_extra=None):
     """
     Guarda los pesos de una red neuronal entrenada en un archivo .pkl.
 
@@ -29,6 +29,7 @@ def guardar_modelo(W1, b1, W2, b2, nombre_modelo, precision_test=None,
         'precision_test': precision_test,
         'epocas': epocas,
         'learning_rate': learning_rate,
+        'training_time_seconds': training_time,
         'arquitectura': {
             'entrada': int(W1.shape[0]),
             'oculta': int(W1.shape[1]),
@@ -39,8 +40,7 @@ def guardar_modelo(W1, b1, W2, b2, nombre_modelo, precision_test=None,
         metadatos['info_extra'] = info_extra
 
     # Nombre del archivo: nombre_modelo + timestamp para evitar sobreescrituras
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    nombre_archivo = f"{nombre_modelo}_{timestamp}.pkl"
+    nombre_archivo = f"{nombre_modelo}.pkl"
     ruta_archivo = os.path.join(CARPETA_MODELOS, nombre_archivo)
 
     # Empaquetar los datos a guardar en un diccionario
@@ -63,7 +63,7 @@ def guardar_modelo(W1, b1, W2, b2, nombre_modelo, precision_test=None,
 # CARGAR MODELO
 # ─────────────────────────────────────────────────────────────────────────────
 
-def cargar_modelo(ruta_archivo=None, nombre_modelo=None):
+def cargar_modelo(nombre_modelo=None, ruta_archivo=None):
     """
     Carga un modelo previamente guardado desde un archivo .pkl.
     """

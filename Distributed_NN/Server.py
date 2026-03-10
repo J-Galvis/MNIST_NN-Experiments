@@ -415,12 +415,68 @@ class DistributedTrainingServer:
 
 
 
+import argparse
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PUNTO DE ENTRADA PRINCIPAL
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    
+    # permitir pasar parámetros por línea de comandos para el servidor
+    parser = argparse.ArgumentParser(
+        description="Servidor para entrenamiento distribuido."
+    )
+
+    parser.add_argument(
+        "--host",
+        "-H",
+        default=SERVER_HOST,
+        help=f"Host en el que el servidor escuchará (por defecto: {SERVER_HOST})",
+    )
+    parser.add_argument(
+        "--port",
+        "-p",
+        type=int,
+        default=SERVER_PORT,
+        help=f"Puerto en el que el servidor escuchará (por defecto: {SERVER_PORT})",
+    )
+    parser.add_argument(
+        "--particiones",
+        "-n",
+        type=int,
+        default=NUM_PARTICIONES,
+        help=f"Número de particiones/datos (por defecto: {NUM_PARTICIONES})",
+    )
+    parser.add_argument(
+        "--epocas",
+        "-e",
+        type=int,
+        default=EPOCAS,
+        help=f"Cantidad de épocas para entrenar (por defecto: {EPOCAS})",
+    )
+    parser.add_argument(
+        "--lr",
+        "--learning-rate",
+        type=float,
+        default=LEARNING_RATE,
+        help=f"Tasa de aprendizaje (por defecto: {LEARNING_RATE})",
+    )
+    parser.add_argument(
+        "--intervalo-log",
+        type=int,
+        default=INTERVALO_LOG,
+        help=f"Intervalo de logging de métricas (por defecto: {INTERVALO_LOG})",
+    )
+    parser.add_argument(
+        "--seed",
+        "-s",
+        type=int,
+        default=SERVER_RANDOM_SEED,
+        help=f"Semilla aleatoria para particionado (por defecto: {SERVER_RANDOM_SEED})",
+    )
+
+    args = parser.parse_args()
+
     print("\n" + "=" * 70)
     print("  SERVIDOR — ENTRENAMIENTO NEURONAL DISTRIBUIDO")
     print("  Red Neuronal Federada — MNIST — Distribución por Sockets")
@@ -435,12 +491,12 @@ if __name__ == "__main__":
     
     # Crear servidor
     server = DistributedTrainingServer(
-        host=SERVER_HOST,
-        port=SERVER_PORT,
-        num_particiones=NUM_PARTICIONES,
-        epocas=EPOCAS,
-        learning_rate=LEARNING_RATE,
-        intervalo_log=INTERVALO_LOG
+        host=args.host,
+        port=args.port,
+        num_particiones=args.particiones,
+        epocas=args.epocas,
+        learning_rate=args.lr,
+        intervalo_log=args.intervalo_log
     )
     
     # Configurar socket

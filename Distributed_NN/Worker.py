@@ -283,17 +283,53 @@ class DistributedTrainingWorker:
             print(f"{'='*70}")
 
 
+import argparse
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PUNTO DE ENTRADA PRINCIPAL
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    
-    worker = DistributedTrainingWorker(
-        server_host=SERVER_HOST,
-        server_port=SERVER_PORT,
-        server_particiones=NUM_PARTICIONES,
-        server_random_seed=SERVER_RANDOM_SEED
+    # permitir pasar parámetros por línea de comandos para el servidor
+    parser = argparse.ArgumentParser(
+        description="Worker para entrenamiento distribuido."
+    )
+
+    parser.add_argument(
+        "--host",
+        "-H",
+        default=SERVER_HOST,
+        help=f"Host del servidor (por defecto: {SERVER_HOST})",
+    )
+    parser.add_argument(
+        "--port",
+        "-p",
+        type=int,
+        default=SERVER_PORT,
+        help=f"Puerto del servidor (por defecto: {SERVER_PORT})",
+    )
+    parser.add_argument(
+        "--particiones",
+        "-n",
+        type=int,
+        default=NUM_PARTICIONES,
+        help=f"Número de particiones/datos (por defecto: {NUM_PARTICIONES})",
+    )
+    parser.add_argument(
+        "--seed",
+        "-s",
+        type=int,
+        default=SERVER_RANDOM_SEED,
+        help=f"Semilla aleatoria para particionado (por defecto: {SERVER_RANDOM_SEED})",
     )
     
+    args = parser.parse_args()
+
+    worker = DistributedTrainingWorker(
+        server_host=args.host,
+        server_port=args.port,
+        server_particiones=args.particiones,
+        server_random_seed=args.seed,
+    )
+
     worker.run()

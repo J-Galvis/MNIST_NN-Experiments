@@ -54,9 +54,9 @@ from Utils.ModelPersistence import guardar_modelo, cargar_modelo
 # HIPERPARÁMETROS DEL ALGORITMO MULTIPROCESSING
 # ─────────────────────────────────────────────────────────────────────────────
 
-NUM_PARTICIONES = 4     # Número de subconjuntos en que dividimos los datos
+NUM_PARTICIONES = 3     # Número de subconjuntos en que dividimos los datos
 EPOCAS = 100            # Número total de épocas (rondas de sincronización)
-LEARNING_RATE = 0.1     # Tasa de aprendizaje
+LEARNING_RATE = 0.3     # Tasa de aprendizaje
 INTERVALO_LOG = 10      # Cada cuántas épocas imprimimos progreso
 MAX_WORKERS = NUM_PARTICIONES # Máximo de procesos concurrentes
 
@@ -236,6 +236,7 @@ def entrenar_multiprocessing(X_train, Y_train, y_train, X_test, y_test,
     Los pesos se promedian al final de cada época y ese promedio se convierte
     en el punto de partida de la siguiente época.
     """
+    tiempo_inicio_entrenamiento = time.time()
 
     print("\n" + "=" * 70)
     print("  ALGORITMO MULTIPROCESSING — ENTRENAMIENTO FEDERADO PARALELO")
@@ -352,12 +353,15 @@ def entrenar_multiprocessing(X_train, Y_train, y_train, X_test, y_test,
                   f"Tiempo: {tiempo_epoca:.2f}s")
 
     # ── PASO 4: Evaluación final ─────────────────────────────────────────
+    tiempo_total_entrenamiento = time.time() - tiempo_inicio_entrenamiento
+    
     print("\n" + "=" * 70)
     print("  EVALUACIÓN FINAL")
     print("=" * 70)
     y_pred_test = predecir(X_test, W1, b1, W2, b2)
     acc_final = precision(y_pred_test, y_test)
     print(f"\n  ✓ Precisión FINAL del modelo Multiprocessing en TEST: {acc_final:.2f}%")
+    print(f"  ✓ Tiempo total de entrenamiento: {tiempo_total_entrenamiento:.2f}s")
 
     # ── Graficar resultados ─────────────────────────────────────────────
     graficar_diego(historial_loss, historial_acc, historial_acc_test,
@@ -370,6 +374,7 @@ def entrenar_multiprocessing(X_train, Y_train, y_train, X_test, y_test,
         precision_test=acc_final,
         epocas=epocas,
         learning_rate=LEARNING_RATE,
+        training_time=tiempo_total_entrenamiento,
         info_extra={
             'num_particiones': num_particiones,
             'max_workers': max_workers,

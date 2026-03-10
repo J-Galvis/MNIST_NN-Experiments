@@ -32,6 +32,7 @@ FLUJO DEL ALGORITMO DE ARNOVI
 import sys
 import os
 import numpy as np
+import time
 
 # ── Agregar el directorio padre al path para acceder al paquete Utils ─────────
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -47,9 +48,9 @@ from Utils.ModelPersistence import guardar_modelo, cargar_modelo
 # HIPERPARÁMETROS DEL ALGORITMO DE ARNOVI
 # ─────────────────────────────────────────────────────────────────────────────
 
-NUM_PARTICIONES = 5     # Número de subconjuntos en que dividimos los datos
+NUM_PARTICIONES = 3     # Número de subconjuntos en que dividimos los datos
 EPOCAS_POR_PARTICION = 100  # Cuántas épocas entrena cada mini-red
-LEARNING_RATE = 0.1     # Tasa de aprendizaje (misma que BasicNeuralNetwork)
+LEARNING_RATE = 0.3     # Tasa de aprendizaje (misma que BasicNeuralNetwork)
 INTERVALO_LOG = 10      # Cada cuántas épocas imprimimos el progreso
 
 
@@ -262,6 +263,7 @@ def entrenar_arnovi(X_train, Y_train, y_train, X_test, y_test,
     Cada red individual ve MENOS datos, pero el promediado aprovecha
     la "sabiduría colectiva" de todas las redes.
     """
+    tiempo_inicio = time.time()
 
     print("\n" + "=" * 60)
     print("  ALGORITMO DE ARNOVI — ENTRENAMIENTO DISTRIBUIDO")
@@ -366,14 +368,19 @@ def entrenar_arnovi(X_train, Y_train, y_train, X_test, y_test,
                     NUM_PARTICIONES)
 
     # Guardar el modelo entrenado
+    tiempo_total = time.time() - tiempo_inicio
+    
     y_pred_final = predecir(X_test, W1_final, b1_final, W2_final, b2_final)
     acc_final = precision(y_pred_final, y_test)
+    print(f"\n  Tiempo total de entrenamiento: {tiempo_total:.2f}s")
+    
     guardar_modelo(
         W1_final, b1_final, W2_final, b2_final,
         nombre_modelo='ArnoviNN',
         precision_test=acc_final,
         epocas=EPOCAS_POR_PARTICION,
         learning_rate=LEARNING_RATE,
+        training_time=tiempo_total,
         info_extra={'num_particiones': NUM_PARTICIONES}
     )
 
