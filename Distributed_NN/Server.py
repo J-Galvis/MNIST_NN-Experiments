@@ -368,6 +368,9 @@ class DistributedTrainingServer:
         print(f"  PASO 2: ENTRENAMIENTO FEDERADO DISTRIBUIDO")
         print(f"{'='*70}")
         
+        # Inicio del cronómetro de entrenamiento
+        inicio_entrenamiento = time.time()
+        
         # Bucle principal de épocas
         for epoch in range(1, self.epocas + 1):
             tiempo_inicio_epoca = time.time()
@@ -396,24 +399,32 @@ class DistributedTrainingServer:
         y_pred_test = predecir(self.X_test, self.W1, self.b1, self.W2, self.b2)
         acc_final = precision(y_pred_test, self.y_test)
         print(f"\n  ✓ Precisión FINAL del modelo en TEST: {acc_final:.2f}%")
+        
+        # Calcular tiempo total de entrenamiento
+        tiempo_total = time.time() - inicio_entrenamiento
 
         nombre_modelo = input("\n  Ingrese un nombre para guardar el modelo: ").strip()
         
-        # Guardar modelo
+        # Guardar modelo con métricas completas
         guardar_modelo(
             self.W1, self.b1, self.W2, self.b2,
             nombre_modelo=nombre_modelo,
             precision_test=acc_final,
             epocas=self.epocas,
             learning_rate=self.learning_rate,
+            training_time=tiempo_total,
             info_extra={
                 'num_particiones': self.num_particiones,
                 'architecture': 'Distributed with Sockets',
                 'server_host': self.host,
-                'server_port': self.port
+                'server_port': self.port,
+                'historial_loss': self.historial_loss,
+                'historial_acc': self.historial_acc,
+                'historial_acc_test': self.historial_acc_test,
+                'tiempo_total_segundos': tiempo_total,
+                'tiempo_promedio_por_epoca': tiempo_total / self.epocas if self.epocas > 0 else 0
             }
         )
-
 
 
 
