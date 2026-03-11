@@ -396,11 +396,13 @@ class DistributedTrainingServer:
         y_pred_test = predecir(self.X_test, self.W1, self.b1, self.W2, self.b2)
         acc_final = precision(y_pred_test, self.y_test)
         print(f"\n  ✓ Precisión FINAL del modelo en TEST: {acc_final:.2f}%")
+
+        nombre_modelo = input("\n  Ingrese un nombre para guardar el modelo: ").strip()
         
         # Guardar modelo
         guardar_modelo(
             self.W1, self.b1, self.W2, self.b2,
-            nombre_modelo='DistributedNN_Sockets',
+            nombre_modelo=nombre_modelo,
             precision_test=acc_final,
             epocas=self.epocas,
             learning_rate=self.learning_rate,
