@@ -7,6 +7,7 @@ from datetime import datetime
 
 # ── Carpeta donde se guardan los modelos ─────────────────────────────────────
 CARPETA_MODELOS = os.path.join(os.path.dirname(__file__), '../modelos_guardados')
+CARPETA_STATS = os.path.join(os.path.dirname(__file__), '../stats')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -16,47 +17,68 @@ CARPETA_MODELOS = os.path.join(os.path.dirname(__file__), '../modelos_guardados'
 def guardar_modelo(W1, b1, W2, b2, nombre_modelo, precision_test=None,
                    epocas=None, learning_rate=None, training_time=None, info_extra=None):
     """
-    Guarda los pesos de una red neuronal entrenada en un archivo .pkl.
-
+    Guarda los pesos de una red neuronal entrenada en un archivo .pkl
+    y los metadatos en un archivo JSON.
+    
+    Los pesos se guardan en: nombre_modelo.pkl
+    Los metadatos se guardan en: nombre_modelo_metadata.json
     """
     # Crear la carpeta si no existe
     os.makedirs(CARPETA_MODELOS, exist_ok=True)
 
+    # Nombre de los archivos
+    nombre_archivo_pkl = f"{nombre_modelo}.pkl"
+    nombre_archivo_json = f"{nombre_modelo}_metadata.json"
+    ruta_archivo_pkl = os.path.join(CARPETA_MODELOS, nombre_archivo_pkl)
+    ruta_archivo_json = os.path.join(CARPETA_STATS, nombre_archivo_json)
+
+    # Empaquetar solo los pesos en el pickle
+    datos_modelo = {
+        'W1': W1,
+        'b1': b1,
+        'W2': W2,
+        'b2': b2
+    }
+
+    # Guardar pesos con pickle
+    with open(ruta_archivo_pkl, 'wb') as archivo:
+        pickle.dump(datos_modelo, archivo)
+
     # Construir metadatos
+    fecha_guardado = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Arquitectura
+    entrada = int(W1.shape[0])
+    oculta = int(W1.shape[1])
+    salida = int(W2.shape[1])
+    
+    # Metadatos básicos
     metadatos = {
         'nombre_modelo': nombre_modelo,
-        'fecha_guardado': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'fecha_guardado': fecha_guardado,
         'precision_test': precision_test,
         'epocas': epocas,
         'learning_rate': learning_rate,
         'training_time_seconds': training_time,
         'arquitectura': {
-            'entrada': int(W1.shape[0]),
-            'oculta': int(W1.shape[1]),
-            'salida': int(W2.shape[1])
+            'entrada': entrada,
+            'oculta': oculta,
+            'salida': salida,
         }
     }
+    
+    # Agregar información extra
     if info_extra:
         metadatos['info_extra'] = info_extra
-
-    # Nombre del archivo: nombre_modelo + timestamp para evitar sobreescrituras
-    nombre_archivo = f"{nombre_modelo}.pkl"
-    ruta_archivo = os.path.join(CARPETA_MODELOS, nombre_archivo)
-
-    # Empaquetar los datos a guardar en un diccionario
-    datos_modelo = {
-        'W1': W1,
-        'b1': b1,
-        'W2': W2,
-        'b2': b2,
-        'metadatos': metadatos
-    }
-
-    # Guardar con pickle
-    with open(ruta_archivo, 'wb') as archivo:
-        pickle.dump(datos_modelo, archivo)
-
-    return ruta_archivo
+    
+    # Guardar metadatos en JSON
+    with open(ruta_archivo_json, 'w', encoding='utf-8') as archivo:
+        json.dump(metadatos, archivo, indent=2, ensure_ascii=False)
+    
+    print(f"\n  ✓ Modelo guardado en: {ruta_archivo_pkl}")
+    print(f"  ✓ Metadatos guardados en: {ruta_archivo_json}")
+    
+    return ruta_archivo_pkl
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -97,7 +119,7 @@ def cargar_modelo(nombre_modelo=None, ruta_archivo=None):
         archivo_seleccionado = archivos[-1]
         ruta_archivo = os.path.join(CARPETA_MODELOS, archivo_seleccionado)
 
-    # Cargar el archivo .pkl
+    # Cargar el archivo .pkl (solo pesos)
     if not os.path.exists(ruta_archivo):
         raise FileNotFoundError(f"No se encontró el archivo: {ruta_archivo}")
 
@@ -108,6 +130,30 @@ def cargar_modelo(nombre_modelo=None, ruta_archivo=None):
     b1 = datos['b1']
     W2 = datos['W2']
     b2 = datos['b2']
-    metadatos = datos['metadatos']
 
-    return W1, b1, W2, b2, metadatos
+    return W1, b1, W2, b2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CARGAR METADATOS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def cargar_metadatos(nombre_modelo):
+    """
+    Carga los metadatos de un modelo desde el archivo JSON.
+    
+    Parámetros:
+        nombre_modelo: str, nombre del modelo (sin extensión)
+    
+    Retorna:
+        dict con los metadatos del modelo
+    """
+    archivo_metadatos = os.path.join(CARPETA_STATS, f"{nombre_modelo}_metadata.json")
+    
+    if not os.path.exists(archivo_metadatos):
+        raise FileNotFoundError(f"No se encontró archivo de metadatos: {archivo_metadatos}")
+    
+    with open(archivo_metadatos, 'r', encoding='utf-8') as f:
+        metadatos = json.load(f)
+    
+    return metadatos

@@ -22,6 +22,7 @@ import pickle
 import socket
 import struct
 import time
+import argparse
 from typing import Dict, List, Tuple
 
 # ── Agregar el directorio padre al path para acceder al paquete Utils ─────────
@@ -99,13 +100,13 @@ class DistributedTrainingServer:
         self.worker_sockets: Dict[int, socket.socket] = {}  # batch_id -> socket
         self.worker_connected = {}  # batch_id -> bool
         
-        # Historial
-        self.historial_loss = []
-        self.historial_acc = []
-        self.historial_acc_test = []
-        self.hist_loss_parts = [[] for _ in range(num_particiones)]
-        self.hist_acc_parts = [[] for _ in range(num_particiones)]
         
+        # Historial de checkpoints por INTERVALO_LOG
+        self.historial_intervalo_epochs = []      # Épocas en las que se guardó
+        self.historial_intervalo_times = []       # Tiempos acumulados
+        self.historial_intervalo_acc_train = []   # Precisión en entrenamiento
+        self.historial_intervalo_loss = []        # Loss
+
         # Datos de entrenamiento
         self.particiones = None
         self.X_test = None
@@ -253,10 +254,6 @@ class DistributedTrainingServer:
                 
                 gradientes_epoca.append((message.dW1, message.db1, message.dW2, message.db2))
                 
-                # Almacenar métricas
-                self.hist_loss_parts[batch_id].append(message.loss)
-                self.hist_acc_parts[batch_id].append(message.accuracy)
-                
                 print(f"    ✓ Worker {batch_id} (epoch {message.epoch}): "
                       f"Loss={message.loss:.4f}, Acc={message.accuracy:.1f}%, "
                       f"Time={message.training_time:.4f}s")
@@ -288,9 +285,12 @@ class DistributedTrainingServer:
         
         print(f"    ✓ Pesos globales actualizados (promediado de {self.num_particiones} workers)")
     
-    def evaluate_global_model(self, X_train, Y_train, y_train, epoch):
+    def evaluate_global_model(self, X_train, Y_train, y_train, epoch, tiempo_actual):
         """
         Evalúa el modelo global en entrenamiento y test.
+        
+        Parámetros:
+            tiempo_actual: float, tiempo transcurrido desde el inicio del entrenamiento
         """
         # Evaluación en entrenamiento
         Z1_all, A1_all, Z2_all, A2_all = forward(X_train, self.W1, self.b1, self.W2, self.b2)
@@ -301,24 +301,21 @@ class DistributedTrainingServer:
         y_pred_test = predecir(self.X_test, self.W1, self.b1, self.W2, self.b2)
         acc_test = precision(y_pred_test, self.y_test)
         
-        self.historial_loss.append(loss)
-        self.historial_acc.append(acc_train)
-        self.historial_acc_test.append(acc_test)
+        self.historial_intervalo_epochs.append(epoch)
+        self.historial_intervalo_times.append(tiempo_actual)
+        self.historial_intervalo_acc_train.append(acc_train)
+        self.historial_intervalo_loss.append(loss)
+            
+        print(f"\n  {'─'*68}")
+        print(f"  EVALUACIÓN GLOBAL — ÉPOCA {epoch}/{self.epocas}")
+        print(f"  {'─'*68}")
+
         
-        if epoch % self.intervalo_log == 0 or epoch == 1:
-            print(f"\n  {'─'*68}")
-            print(f"  EVALUACIÓN GLOBAL — ÉPOCA {epoch}/{self.epocas}")
-            print(f"  {'─'*68}")
-            
-            for batch_id in range(self.num_particiones):
-                l_k = self.hist_loss_parts[batch_id][-1]
-                a_k = self.hist_acc_parts[batch_id][-1]
-                print(f"    [Worker {batch_id}] Loss={l_k:.4f}, Acc={a_k:.1f}%")
-            
-            print(f"  {'─'*68}")
-            print(f"    ✓ GLOBAL → Loss: {loss:.4f} │ "
-                  f"Acc Train: {acc_train:.1f}% │ "
-                  f"Acc Test: {acc_test:.1f}%")
+        print(f"  {'─'*68}")
+        print(f"    ✓ GLOBAL → Loss: {loss:.4f} │ "
+                f"Acc Train: {acc_train:.1f}% │ "
+                f"Acc Test: {acc_test:.1f}%")
+        print(f"    ⏱ Tiempo acumulado: {tiempo_actual:.2f}s")
     
     def shutdown(self):
         """Cierra todas las conexiones de workers."""
@@ -384,8 +381,11 @@ class DistributedTrainingServer:
             # Actualizar pesos globales
             self.update_global_weights(gradientes_epoca, epoch)
             
+            # Tiempo transcurrido desde el inicio del entrenamiento
+            tiempo_actual = time.time() - inicio_entrenamiento
+            
             # Evaluar modelo global
-            self.evaluate_global_model(X_train, Y_train, y_train, epoch)
+            self.evaluate_global_model(X_train, Y_train, y_train, epoch, tiempo_actual)
             
             tiempo_epoca = time.time() - tiempo_inicio_epoca
             
@@ -418,17 +418,13 @@ class DistributedTrainingServer:
                 'architecture': 'Distributed with Sockets',
                 'server_host': self.host,
                 'server_port': self.port,
-                'historial_loss': self.historial_loss,
-                'historial_acc': self.historial_acc,
-                'historial_acc_test': self.historial_acc_test,
                 'tiempo_total_segundos': tiempo_total,
-                'tiempo_promedio_por_epoca': tiempo_total / self.epocas if self.epocas > 0 else 0
+                'historial_intervalo_epochs': self.historial_intervalo_epochs,
+                'historial_intervalo_times': self.historial_intervalo_times,
+                'historial_intervalo_acc_train': self.historial_intervalo_acc_train,
+                'historial_intervalo_loss': self.historial_intervalo_loss,
             }
         )
-
-
-
-import argparse
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PUNTO DE ENTRADA PRINCIPAL
