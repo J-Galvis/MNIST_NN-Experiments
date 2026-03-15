@@ -302,9 +302,9 @@ class DistributedTrainingServer:
         acc_test = precision(y_pred_test, self.y_test)
         
         self.historial_intervalo_epochs.append(epoch)
-        self.historial_intervalo_times.append(tiempo_actual)
-        self.historial_intervalo_acc_train.append(acc_train)
-        self.historial_intervalo_loss.append(loss)
+        self.historial_intervalo_times.append(round(tiempo_actual, 6))
+        self.historial_intervalo_acc_train.append(round(acc_train, 6))
+        self.historial_intervalo_loss.append(round(loss, 6))
             
         print(f"\n  {'─'*68}")
         print(f"  EVALUACIÓN GLOBAL — ÉPOCA {epoch}/{self.epocas}")
