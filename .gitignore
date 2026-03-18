@@ -5,5 +5,4 @@ modelos_guardados
 .gitignore
 *.pyc
 __pycache__/
-stats/
 Images/
